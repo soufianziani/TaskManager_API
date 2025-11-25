@@ -14,6 +14,15 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, Notifiable, HasRoles;
 
     /**
+     * Get the guard name for Spatie Permission package.
+     * This ensures roles and permissions use the 'api' guard for API authentication.
+     */
+    public function guardName(): string
+    {
+        return 'api';
+    }
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>

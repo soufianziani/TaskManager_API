@@ -35,6 +35,8 @@ class CreateCategoryRequest extends FormRequest
             'description' => ['nullable', 'string'],
             'permission' => ['nullable', 'string', 'max:255'],
             'is_active' => ['nullable', 'boolean'],
+            'icon' => ['nullable', 'string', 'max:255'],
+            'color' => ['nullable', 'string', 'max:50'],
         ];
     }
 }

@@ -13,8 +13,10 @@ class Type extends Model
     protected $fillable = [
         'department_id',
         'name',
+        'icon',
         'color',
         'description',
+        'permission',
         'is_active',
     ];
 

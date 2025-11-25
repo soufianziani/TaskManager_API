@@ -5,7 +5,7 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class CreateTypeRequest extends FormRequest
+class UpdateRoleRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -22,21 +22,20 @@ class CreateTypeRequest extends FormRequest
      */
     public function rules(): array
     {
+        $roleId = $this->route('id');
+        
         return [
-            'department_id' => ['required', 'exists:departments,id'],
             'name' => [
+                'sometimes',
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('types')->where(function ($query) {
-                    return $query->where('department_id', $this->department_id);
-                }),
+                Rule::unique('roles', 'name')->ignore($roleId),
             ],
-            'icon' => ['nullable', 'string', 'max:255'],
-            'color' => ['required', 'string', 'max:50'],
-            'description' => ['nullable', 'string'],
-            'permission' => ['nullable', 'string', 'max:255'],
-            'is_active' => ['nullable', 'boolean'],
+            'guard_name' => ['nullable', 'string', 'max:255'],
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['exists:permissions,name'],
         ];
     }
 }
+

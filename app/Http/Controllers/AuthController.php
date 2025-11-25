@@ -4,12 +4,17 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\RegisterRequest;
 use App\Http\Requests\VerifyOtpRequest;
+use App\Models\Category;
+use App\Models\Department;
+use App\Models\Type;
 use App\Models\User;
 use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\Models\Permission;
 
 class AuthController extends Controller
 {
@@ -170,6 +175,101 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'data' => $user,
+        ]);
+    }
+
+    /**
+     * Get all users.
+     */
+    public function getAllUsers(Request $request): JsonResponse
+    {
+        $users = User::with(['roles', 'permissions'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Users retrieved successfully',
+            'data' => $users,
+        ]);
+    }
+
+    /**
+     * Get all departments.
+     */
+    public function getAllDepartments(Request $request): JsonResponse
+    {
+        $departments = Department::where('is_active', true)
+            ->orderBy('name', 'asc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Departments retrieved successfully',
+            'data' => $departments,
+        ]);
+    }
+
+    /**
+     * Get all roles.
+     */
+    public function getAllRoles(Request $request): JsonResponse
+    {
+        $roles = Role::with('permissions')
+            ->orderBy('name', 'asc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Roles retrieved successfully',
+            'data' => $roles,
+        ]);
+    }
+
+    /**
+     * Get all permissions.
+     */
+    public function getAllPermissions(Request $request): JsonResponse
+    {
+        $permissions = Permission::orderBy('name', 'asc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Permissions retrieved successfully',
+            'data' => $permissions,
+        ]);
+    }
+
+    /**
+     * Get all categories.
+     */
+    public function getAllCategories(Request $request): JsonResponse
+    {
+        $categories = Category::with('department')
+            ->orderBy('name', 'asc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Categories retrieved successfully',
+            'data' => $categories,
+        ]);
+    }
+
+    /**
+     * Get all types.
+     */
+    public function getAllTypes(Request $request): JsonResponse
+    {
+        $types = Type::with('department')
+            ->orderBy('name', 'asc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Types retrieved successfully',
+            'data' => $types,
         ]);
     }
 }
