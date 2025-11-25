@@ -28,7 +28,7 @@ Route::post('/login', [App\Http\Controllers\AuthController::class, 'login']); //
 Route::post('/login-otp', [App\Http\Controllers\AuthController::class, 'loginWithOtp']); // OTP login
 Route::post('/register-otp', [App\Http\Controllers\AuthController::class, 'registerWithOtp']); // OTP register
 Route::post('/set-password', [App\Http\Controllers\AuthController::class, 'setPassword']); // Set password and activate user
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout']);
     Route::get('/user', [App\Http\Controllers\AuthController::class, 'user']);
     Route::get('/users', [App\Http\Controllers\AuthController::class, 'getAllUsers']);
@@ -61,14 +61,14 @@ Route::prefix('super-admin')->middleware(['auth:sanctum', 'super.admin'])->group
 });
 
 // File Upload Routes
-Route::prefix('admin')->middleware(['auth:sanctum'])->group(function () {
+Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::post('/upload-file', [App\Http\Controllers\FileController::class, 'upload']);
     Route::post('/upload-file-url', [App\Http\Controllers\FileController::class, 'uploadFromUrl']);
     Route::get('/file/{id}', [App\Http\Controllers\FileController::class, 'getFile']);
 });
 
 // Admin Routes (Tasks)
-Route::prefix('admin')->middleware(['auth:sanctum'])->group(function () {
+Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::post('/create-task', [App\Http\Controllers\Admin\TaskController::class, 'create']);
     Route::get('/task-counts', [App\Http\Controllers\Admin\TaskController::class, 'getTaskCountsByType']);
     Route::get('/task-counts-status', [App\Http\Controllers\Admin\TaskController::class, 'getTaskCountsByStatus']);

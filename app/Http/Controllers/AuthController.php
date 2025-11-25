@@ -60,6 +60,14 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // Check if user has a password set
+        if (!$user->password) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please complete your registration by setting a password.',
+            ], 403);
+        }
+
         // Update device info if provided
         if ($request->has('device_id')) {
             $user->update(['device_id' => $request->device_id]);
@@ -124,14 +132,15 @@ class AuthController extends Controller
             'is_active' => false, // Inactive by default, will be activated after password creation
         ]);
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        // Do NOT return token here - user must complete OTP verification and password setup first
+        // Token will be returned after password is set in setPassword method
 
         return response()->json([
             'success' => true,
             'message' => 'Registration successful. Please verify your phone number with OTP.',
             'data' => [
                 'user' => $user,
-                'token' => $token,
+                // No token returned - user must complete registration steps first
             ],
         ], 201);
     }
@@ -148,10 +157,18 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (!$user || !$user->password || !Hash::check($request->password, $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
+        }
+
+        // Check if user is active
+        if (!$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active. Please complete your registration by setting a password.',
+            ], 403);
         }
 
         // Update device info if provided
@@ -307,56 +324,56 @@ class AuthController extends Controller
     public function setPassword(SetPasswordRequest $request): JsonResponse
     {
         try {
-            // Find user by phone number
-            $user = User::where('phone_number', $request->phone_number)->first();
+        // Find user by phone number
+        $user = User::where('phone_number', $request->phone_number)->first();
 
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'User not found.',
-                ], 404);
-            }
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found.',
+            ], 404);
+        }
 
-            // Check if user has verified their phone number
-            if (!$user->is_number_validated) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Please verify your phone number with OTP first.',
-                ], 400);
-            }
+        // Check if user has verified their phone number
+        if (!$user->is_number_validated) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please verify your phone number with OTP first.',
+            ], 400);
+        }
 
-            // Check if user already has a password and is active (already completed registration)
+        // Check if user already has a password and is active (already completed registration)
             // Allow setting password if:
             // 1. User doesn't have a password (new registration)
             // 2. User has password but is inactive (reactivation/reset scenario)
             // Prevent if user has password AND is active (already completed registration)
-            if ($user->password && $user->is_active) {
-                return response()->json([
-                    'success' => false,
+        if ($user->password && $user->is_active) {
+            return response()->json([
+                'success' => false,
                     'message' => 'Password already set. User is already active. Please use password reset if you need to change your password.',
-                ], 400);
-            }
+            ], 400);
+        }
 
-            // Set password and activate user
+        // Set password and activate user
             // Note: User model has 'password' cast to 'hashed' (Laravel 10+), so direct assignment will auto-hash
             // Using direct assignment to avoid double-hashing
             $user->password = $request->password;
             $user->is_active = true;
             $user->save();
 
-            $user->refresh();
+        $user->refresh();
 
-            // Create authentication token
-            $token = $user->createToken('auth-token')->plainTextToken;
+        // Create authentication token
+        $token = $user->createToken('auth-token')->plainTextToken;
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Password set successfully. Account activated.',
-                'data' => [
-                    'user' => $user->load(['roles', 'permissions']),
-                    'token' => $token,
-                ],
-            ]);
+        return response()->json([
+            'success' => true,
+            'message' => 'Password set successfully. Account activated.',
+            'data' => [
+                'user' => $user->load(['roles', 'permissions']),
+                'token' => $token,
+            ],
+        ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
