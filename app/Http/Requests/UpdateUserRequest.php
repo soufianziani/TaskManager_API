@@ -41,6 +41,7 @@ class UpdateUserRequest extends FormRequest
                 'max:255',
                 Rule::unique('users', 'phone_number')->ignore($userId),
             ],
+            'whatsapp_number' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'type' => ['sometimes', 'string', 'in:user,admin,super_admin'],
             'roles' => ['nullable', 'array'],

@@ -28,20 +28,25 @@ class SuperAdminController extends Controller
 {
     /**
      * Create a new department.
-     * Only super_admin users can create departments.
+     * Super admin or users with "admin" or "task config" permission can create departments.
      */
     public function createDepartment(CreateDepartmentRequest $request): JsonResponse
     {
         $user = $request->user();
 
-        // Verify user type is super_admin
-        if ($user->type !== 'super_admin') {
+        // Check if user is super admin or has required permissions
+        $isSuperAdmin = $user->type === 'super_admin';
+        $hasAdminPermission = $user->hasPermissionTo('admin', 'api');
+        $hasTaskConfigPermission = $user->hasPermissionTo('task config', 'api');
+
+        if (!$isSuperAdmin && !$hasAdminPermission && !$hasTaskConfigPermission) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admin can create departments.',
+                'message' => 'Unauthorized. Super Admin or users with "admin" or "task config" permission required.',
                 'data' => [
                     'user_type' => $user->type,
-                    'required_type' => 'super_admin',
+                    'has_admin_permission' => $hasAdminPermission,
+                    'has_task_config_permission' => $hasTaskConfigPermission,
                 ],
             ], 403);
         }
@@ -64,20 +69,25 @@ class SuperAdminController extends Controller
 
     /**
      * Update an existing department.
-     * Only super_admin users can update departments.
+     * Super admin or users with "admin" or "task config" permission can update departments.
      */
     public function updateDepartment(UpdateDepartmentRequest $request, int $id): JsonResponse
     {
         $user = $request->user();
 
-        // Verify user type is super_admin
-        if ($user->type !== 'super_admin') {
+        // Check if user is super admin or has required permissions
+        $isSuperAdmin = $user->type === 'super_admin';
+        $hasAdminPermission = $user->hasPermissionTo('admin', 'api');
+        $hasTaskConfigPermission = $user->hasPermissionTo('task config', 'api');
+
+        if (!$isSuperAdmin && !$hasAdminPermission && !$hasTaskConfigPermission) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admin can update departments.',
+                'message' => 'Unauthorized. Super Admin or users with "admin" or "task config" permission required.',
                 'data' => [
                     'user_type' => $user->type,
-                    'required_type' => 'super_admin',
+                    'has_admin_permission' => $hasAdminPermission,
+                    'has_task_config_permission' => $hasTaskConfigPermission,
                 ],
             ], 403);
         }
@@ -110,6 +120,49 @@ class SuperAdminController extends Controller
             'success' => true,
             'message' => 'Department updated successfully',
             'data' => $department,
+        ], 200);
+    }
+
+    /**
+     * Delete an existing department.
+     * Super admin or users with "admin" or "task config" permission can delete departments.
+     */
+    public function deleteDepartment(int $id): JsonResponse
+    {
+        $user = request()->user();
+
+        // Check if user is super admin or has required permissions
+        $isSuperAdmin = $user->type === 'super_admin';
+        $hasAdminPermission = $user->hasPermissionTo('admin', 'api');
+        $hasTaskConfigPermission = $user->hasPermissionTo('task config', 'api');
+
+        if (!$isSuperAdmin && !$hasAdminPermission && !$hasTaskConfigPermission) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Super Admin or users with "admin" or "task config" permission required.',
+                'data' => [
+                    'user_type' => $user->type,
+                    'has_admin_permission' => $hasAdminPermission,
+                    'has_task_config_permission' => $hasTaskConfigPermission,
+                ],
+            ], 403);
+        }
+
+        $department = Department::findOrFail($id);
+
+        // Check if department has categories or types
+        if ($department->categories()->count() > 0 || $department->types()->count() > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete department. It has associated categories or types. Please remove them first.',
+            ], 422);
+        }
+
+        $department->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Department deleted successfully',
         ], 200);
     }
 
@@ -585,20 +638,54 @@ class SuperAdminController extends Controller
 
     /**
      * Update an existing user.
-     * Only super_admin users can update users.
+     * Super admin can update any user.
+     * Users can update their own profile (limited fields).
      */
     public function updateUser(UpdateUserRequest $request, int $id): JsonResponse
     {
         $currentUser = $request->user();
+        $user = User::findOrFail($id);
 
-        if ($currentUser->type !== 'super_admin') {
+        // Check if user is super admin or editing their own profile
+        $isSuperAdmin = $currentUser->type === 'super_admin';
+        $isOwnProfile = $currentUser->id === $user->id;
+
+        if (!$isSuperAdmin && !$isOwnProfile) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admin can update users.',
+                'message' => 'Unauthorized. You can only edit your own profile or must be a Super Admin.',
             ], 403);
         }
 
-        $user = User::findOrFail($id);
+        // If user is editing their own profile (not super admin), restrict certain fields
+        if ($isOwnProfile && !$isSuperAdmin) {
+            // Users can only update: first_name, last_name, email, phone_number, whatsapp_number
+            // They cannot update: type, is_active, roles, permissions, reset_password
+            if ($request->has('type')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You cannot change your own user type.',
+                ], 403);
+            }
+            if ($request->has('is_active')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You cannot change your own active status.',
+                ], 403);
+            }
+            if ($request->has('roles')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You cannot change your own roles.',
+                ], 403);
+            }
+            if ($request->has('reset_password')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You cannot reset your own password through this endpoint. Use change password instead.',
+                ], 403);
+            }
+        }
 
         // Prevent deactivating super_admin users
         if ($request->has('is_active') && $request->is_active === false && $user->type === 'super_admin') {
@@ -620,6 +707,9 @@ class SuperAdminController extends Controller
         }
         if ($request->has('phone_number')) {
             $user->phone_number = $request->phone_number;
+        }
+        if ($request->has('whatsapp_number')) {
+            $user->whatsapp_number = $request->whatsapp_number;
         }
         if ($request->has('is_active')) {
             // Only allow setting to true for super_admin, or any value for other users

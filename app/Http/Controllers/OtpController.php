@@ -267,12 +267,13 @@ class OtpController extends Controller
             ], 400);
         }
 
-        // If OTP verified for register purpose, validate phone number
+        // If OTP verified for register purpose, validate phone number (but don't activate yet)
+        // User will be activated after password creation
         if ($request->purpose === 'register' && $result['user']) {
             $result['user']->update([
-                'is_active' => true, // Ensure active (already true by default, but ensures consistency)
                 'is_number_validated' => true,
                 'validated_by' => $result['otp_log']->provider,
+                // Note: is_active remains false until password is set
             ]);
             $result['user']->refresh();
         }

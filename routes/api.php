@@ -27,6 +27,7 @@ Route::post('/webhooks/whatsapp/callback', [App\Http\Controllers\OtpController::
 Route::post('/login', [App\Http\Controllers\AuthController::class, 'login']); // Email/Password login
 Route::post('/login-otp', [App\Http\Controllers\AuthController::class, 'loginWithOtp']); // OTP login
 Route::post('/register-otp', [App\Http\Controllers\AuthController::class, 'registerWithOtp']); // OTP register
+Route::post('/set-password', [App\Http\Controllers\AuthController::class, 'setPassword']); // Set password and activate user
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout']);
     Route::get('/user', [App\Http\Controllers\AuthController::class, 'user']);
@@ -36,12 +37,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/types', [App\Http\Controllers\AuthController::class, 'getAllTypes']);
     Route::get('/roles', [App\Http\Controllers\AuthController::class, 'getAllRoles']);
     Route::get('/permissions', [App\Http\Controllers\AuthController::class, 'getAllPermissions']);
+    // Allow users to update their own profile (super admin can update any user)
+    Route::put('/update-user/{id}', [SuperAdminController::class, 'updateUser']);
+    // Department management (super admin or users with admin/task config permission)
+    Route::post('/create-department', [SuperAdminController::class, 'createDepartment']);
+    Route::put('/update-department/{id}', [SuperAdminController::class, 'updateDepartment']);
+    Route::delete('/delete-department/{id}', [SuperAdminController::class, 'deleteDepartment']);
 });
 
 // Super Admin Routes
 Route::prefix('super-admin')->middleware(['auth:sanctum', 'super.admin'])->group(function () {
-    Route::post('/create-department', [SuperAdminController::class, 'createDepartment']);
-    Route::put('/update-department/{id}', [SuperAdminController::class, 'updateDepartment']);
     Route::post('/create-categorie', [SuperAdminController::class, 'createCategory']); // Note: keeping original spelling
     Route::put('/update-categorie/{id}', [SuperAdminController::class, 'updateCategory']);
     Route::post('/create-type', [SuperAdminController::class, 'createType']);
@@ -52,7 +57,6 @@ Route::prefix('super-admin')->middleware(['auth:sanctum', 'super.admin'])->group
     Route::post('/create-role', [SuperAdminController::class, 'createRole']);
     Route::put('/update-role/{id}', [SuperAdminController::class, 'updateRole']);
     Route::delete('/delete-role/{id}', [SuperAdminController::class, 'deleteRole']);
-    Route::put('/update-user/{id}', [SuperAdminController::class, 'updateUser']);
     Route::post('/assign-user-roles-permissions', [SuperAdminController::class, 'assignUserRolesPermissions']);
 });
 

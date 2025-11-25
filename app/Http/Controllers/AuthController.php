@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\RegisterRequest;
+use App\Http\Requests\SetPasswordRequest;
 use App\Http\Requests\VerifyOtpRequest;
 use App\Models\Category;
 use App\Models\Department;
@@ -51,6 +52,14 @@ class AuthController extends Controller
             ], 404);
         }
 
+        // Check if user is active
+        if (!$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active. Please complete your registration by setting a password.',
+            ], 403);
+        }
+
         // Update device info if provided
         if ($request->has('device_id')) {
             $user->update(['device_id' => $request->device_id]);
@@ -86,10 +95,20 @@ class AuthController extends Controller
             ], 409);
         }
 
-        // Generate unique username
+        // Generate unique numeric username
         $username = $this->otpService->generateUniqueUsername();
 
-        // Create user (active by default, phone number validation after OTP verification)
+        // Generate unique FCM token if not provided or if it already exists
+        $fcmToken = $request->fcm_token;
+        if ($fcmToken && User::where('fcm_token', $fcmToken)->exists()) {
+            // Generate a unique FCM token if the provided one is already in use
+            $fcmToken = $this->otpService->generateUniqueFcmToken();
+        } elseif (!$fcmToken) {
+            // Generate a unique FCM token if not provided
+            $fcmToken = $this->otpService->generateUniqueFcmToken();
+        }
+
+        // Create user (inactive by default, will be activated after password creation)
         $user = User::create([
             'user_name' => $username,
             'first_name' => $request->first_name,
@@ -99,10 +118,10 @@ class AuthController extends Controller
             'whatsapp_number' => $request->whatsapp_number,
             'support_number' => $request->support_number,
             'device_id' => $request->device_id,
-            'fcm_token' => $request->fcm_token,
+            'fcm_token' => $fcmToken,
             'email' => $request->email,
             'is_number_validated' => false, // Will be set to true after OTP verification
-            'is_active' => true, // Active by default
+            'is_active' => false, // Inactive by default, will be activated after password creation
         ]);
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -133,6 +152,14 @@ class AuthController extends Controller
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
+        }
+
+        // Update device info if provided
+        if ($request->has('device_id')) {
+            $user->update(['device_id' => $request->device_id]);
+        }
+        if ($request->has('fcm_token')) {
+            $user->update(['fcm_token' => $request->fcm_token]);
         }
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -271,5 +298,70 @@ class AuthController extends Controller
             'message' => 'Types retrieved successfully',
             'data' => $types,
         ]);
+    }
+
+    /**
+     * Set password and activate user after OTP verification.
+     * This endpoint is called after OTP verification during registration.
+     */
+    public function setPassword(SetPasswordRequest $request): JsonResponse
+    {
+        try {
+            // Find user by phone number
+            $user = User::where('phone_number', $request->phone_number)->first();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not found.',
+                ], 404);
+            }
+
+            // Check if user has verified their phone number
+            if (!$user->is_number_validated) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please verify your phone number with OTP first.',
+                ], 400);
+            }
+
+            // Check if user already has a password and is active (already completed registration)
+            // Allow setting password if:
+            // 1. User doesn't have a password (new registration)
+            // 2. User has password but is inactive (reactivation/reset scenario)
+            // Prevent if user has password AND is active (already completed registration)
+            if ($user->password && $user->is_active) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Password already set. User is already active. Please use password reset if you need to change your password.',
+                ], 400);
+            }
+
+            // Set password and activate user
+            // Note: User model has 'password' cast to 'hashed' (Laravel 10+), so direct assignment will auto-hash
+            // Using direct assignment to avoid double-hashing
+            $user->password = $request->password;
+            $user->is_active = true;
+            $user->save();
+
+            $user->refresh();
+
+            // Create authentication token
+            $token = $user->createToken('auth-token')->plainTextToken;
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Password set successfully. Account activated.',
+                'data' => [
+                    'user' => $user->load(['roles', 'permissions']),
+                    'token' => $token,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while setting the password: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

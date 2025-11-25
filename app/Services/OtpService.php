@@ -332,15 +332,27 @@ class OtpService
     }
 
     /**
-     * Generate unique 4-character username
+     * Generate unique 4-digit numeric username (e.g., 1234, 4358)
      */
     public function generateUniqueUsername(): string
     {
         do {
-            $username = strtoupper(Str::random(4));
+            $username = str_pad((string) rand(1000, 9999), 4, '0', STR_PAD_LEFT);
         } while (User::where('user_name', $username)->exists());
 
         return $username;
+    }
+
+    /**
+     * Generate unique FCM token
+     */
+    public function generateUniqueFcmToken(): string
+    {
+        do {
+            $token = 'fcm_' . Str::random(32) . '_' . time();
+        } while (User::where('fcm_token', $token)->exists());
+
+        return $token;
     }
 }
 
