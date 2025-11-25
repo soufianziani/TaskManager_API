@@ -568,7 +568,9 @@ class TaskController extends Controller
 
     /**
      * Get refuse history for a task.
-     * Only super_admin, admin, or controller of the task can view refuse history.
+     * - Super admin and admin can view all refuse history
+     * - Controller of the task can view refuse history
+     * - Assigned users (task users) can view refuse history for their tasks (to see why task was refused)
      */
     public function getRefuseHistory(Request $request, $id): JsonResponse
     {
@@ -587,12 +589,15 @@ class TaskController extends Controller
         
         $isAdmin = $user->type === 'admin';
         $isSuperAdmin = $user->type === 'super_admin';
+        
+        // Check if task is assigned to user
+        $isAssignedToUser = $this->isTaskAssignedToUser($task, $user->id);
 
-        // Only super_admin, admin, or controller can view refuse history
-        if (!$isSuperAdmin && !$isAdmin && !$isController) {
+        // Allow: super_admin, admin, controller, or assigned users (task users)
+        if (!$isSuperAdmin && !$isAdmin && !$isController && !$isAssignedToUser) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only super admin, admin, or task controller can view refuse history.',
+                'message' => 'Unauthorized. Only super admin, admin, task controller, or assigned users can view refuse history.',
             ], 403);
         }
 
