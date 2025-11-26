@@ -8,6 +8,7 @@ use App\Http\Requests\CreateDepartmentRequest;
 use App\Http\Requests\CreatePermissionRequest;
 use App\Http\Requests\CreateRoleRequest;
 use App\Http\Requests\CreateTaskNameRequest;
+use App\Http\Requests\CreateUserRequest;
 use App\Http\Requests\UpdateCategoryRequest;
 use App\Http\Requests\UpdateDepartmentRequest;
 use App\Http\Requests\UpdateTaskNameRequest;
@@ -744,6 +745,93 @@ class SuperAdminController extends Controller
             'success' => true,
             'message' => 'Permission deleted successfully',
         ], 200);
+    }
+
+    /**
+     * Create a new user.
+     * Only super_admin can create users.
+     */
+    public function createUser(CreateUserRequest $request): JsonResponse
+    {
+        $currentUser = $request->user();
+
+        // Only super_admin can create users
+        if ($currentUser->type !== 'super_admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admin can create users.',
+            ], 403);
+        }
+
+        // Generate unique 4-digit username starting from 1000
+        // Find the highest existing numeric username >= 1000 and <= 9999
+        $maxUsername = User::whereNotNull('user_name')
+            ->whereRaw('user_name REGEXP "^[0-9]{4}$"') // Only 4-digit numbers
+            ->whereRaw('CAST(user_name AS UNSIGNED) >= 1000')
+            ->whereRaw('CAST(user_name AS UNSIGNED) <= 9999')
+            ->orderByRaw('CAST(user_name AS UNSIGNED) DESC')
+            ->value('user_name');
+
+        $nextUsername = 1000; // Default starting point
+        
+        if ($maxUsername !== null && is_numeric($maxUsername)) {
+            $nextUsername = (int)$maxUsername + 1;
+        }
+
+        // If we've exceeded 9999, find the first available number starting from 1000
+        if ($nextUsername > 9999) {
+            $nextUsername = 1000;
+        }
+
+        // Find the next available username (in case there are gaps)
+        $userName = (string)$nextUsername;
+        while (User::where('user_name', $userName)->exists() && $nextUsername <= 9999) {
+            $nextUsername++;
+            $userName = (string)$nextUsername;
+        }
+        
+        // If all numbers are taken, return error
+        if ($nextUsername > 9999) {
+            return response()->json([
+                'success' => false,
+                'message' => 'All 4-digit usernames (1000-9999) are in use. Please contact system administrator.',
+            ], 422);
+        }
+
+        // Username is already 4 digits (1000-9999), no padding needed
+        $userName = (string)$nextUsername;
+
+        // Create user
+        $user = User::create([
+            'first_name' => $request->first_name,
+            'last_name' => $request->last_name ?? '',
+            'user_name' => $userName,
+            'email' => $request->email,
+            'phone_number' => $request->phone_number,
+            'whatsapp_number' => $request->whatsapp_number,
+            'type' => $request->type,
+            'is_active' => $request->is_active ?? true,
+            'password' => Hash::make(Str::random(12)), // Generate random password
+        ]);
+
+        // Assign roles if provided
+        if ($request->has('roles') && !empty($request->roles)) {
+            $roles = Role::whereIn('id', $request->roles)
+                ->where('guard_name', 'api')
+                ->get();
+            
+            if ($roles->count() > 0) {
+                $user->syncRoles($roles);
+            }
+        }
+
+        $user->load(['roles', 'permissions']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'User created successfully',
+            'data' => $user,
+        ], 201);
     }
 
     /**

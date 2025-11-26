@@ -50,6 +50,7 @@ Route::middleware(['auth:sanctum', 'user.active'])->group(function () {
 
 // Super Admin Routes - allow authenticated users with proper permissions
 Route::prefix('super-admin')->middleware(['auth:sanctum', 'user.active'])->group(function () {
+    Route::post('/create-user', [SuperAdminController::class, 'createUser']); // Only super_admin
     Route::put('/update-user/{id}', [SuperAdminController::class, 'updateUser']); // Requires actors permission or own profile
 });
 
