@@ -64,14 +64,20 @@ class FileController extends Controller
             $filename = time() . '_' . uniqid() . '.' . $uploadedFile->getClientOriginalExtension();
             
             // Store file in storage/app/public/files
+            // $path will be something like: files/unique_name.ext
             $path = $uploadedFile->storeAs('files', $filename, 'public');
 
-            // Save file record to database
-            // Use the full path: storage/files/filename.ext
+            // Build a public URL for the stored file.
+            // Storage::url($path) -> "/storage/files/unique_name.ext"
+            // url(...) will prepend APP_URL (e.g. https://taskmanager.wadina.agency)
+            $publicPath = Storage::url($path);          // "/storage/files/unique_name.ext"
+            $fullUrl    = url($publicPath);             // "https://taskmanager.wadina.agency/storage/files/unique_name.ext"
+
+            // Save file record to database with the full public URL
             $file = File::create([
                 'type' => $type,
                 'file_for' => $fileFor,
-                'url' => 'storage/' . $path, // Returns storage/files/filename.ext
+                'url' => $fullUrl,
             ]);
 
             return response()->json([
@@ -81,7 +87,7 @@ class FileController extends Controller
                     'id' => $file->id,
                     'type' => $file->type,
                     'file_for' => $file->file_for,
-                    'url' => $file->url,
+                    'url' => $file->url, // full URL
                 ],
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
