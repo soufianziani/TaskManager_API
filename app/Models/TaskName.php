@@ -7,11 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Type extends Model
+class TaskName extends Model
 {
     use HasFactory;
 
-    // Map to the new underlying table name `task_name`
     protected $table = 'task_name';
 
     protected $fillable = [
@@ -29,7 +28,7 @@ class Type extends Model
     ];
 
     /**
-     * Get the category that owns the type.
+     * Get the category that owns the task name.
      */
     public function category(): BelongsTo
     {
@@ -37,10 +36,11 @@ class Type extends Model
     }
 
     /**
-     * Get all tasks for this type.
+     * Get all tasks for this task name.
      */
     public function tasks(): HasMany
     {
-        return $this->hasMany(Task::class, 'type_id');
+        return $this->hasMany(Task::class, 'task_name');
     }
 }
+

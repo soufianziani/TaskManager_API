@@ -5,7 +5,7 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class CreateTypeRequest extends FormRequest
+class CreateTaskNameRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -28,7 +28,7 @@ class CreateTypeRequest extends FormRequest
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('types')->where(function ($query) {
+                Rule::unique('task_name')->where(function ($query) {
                     return $query->where('category_id', $this->category_id);
                 }),
             ],
@@ -40,3 +40,4 @@ class CreateTypeRequest extends FormRequest
         ];
     }
 }
+

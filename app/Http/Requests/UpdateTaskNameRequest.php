@@ -2,11 +2,11 @@
 
 namespace App\Http\Requests;
 
-use App\Models\Type;
+use App\Models\TaskName;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class UpdateTypeRequest extends FormRequest
+class UpdateTaskNameRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -23,9 +23,9 @@ class UpdateTypeRequest extends FormRequest
      */
     public function rules(): array
     {
-        $typeId = $this->route('id');
-        $existingType = $typeId ? Type::find($typeId) : null;
-        $categoryId = $this->category_id ?? $existingType?->category_id;
+        $taskNameId = $this->route('id');
+        $existingTaskName = $taskNameId ? TaskName::find($taskNameId) : null;
+        $categoryId = $this->category_id ?? $existingTaskName?->category_id;
 
         return [
             'category_id' => ['sometimes', 'exists:categories,id'],
@@ -34,10 +34,10 @@ class UpdateTypeRequest extends FormRequest
                 'string',
                 'max:255',
                 $categoryId
-                    ? Rule::unique('types')
+                    ? Rule::unique('task_name')
                         ->where(fn($query) => $query->where('category_id', $categoryId))
-                        ->ignore($typeId)
-                    : Rule::unique('types')->ignore($typeId),
+                        ->ignore($taskNameId)
+                    : Rule::unique('task_name')->ignore($taskNameId),
             ],
             'icon' => ['sometimes', 'nullable', 'string', 'max:255'],
             'color' => ['sometimes', 'nullable', 'string', 'max:50'],

@@ -40,7 +40,7 @@ class TaskController extends Controller
             'redirect' => $request->redirect ?? false,
             'department' => $request->department,
             'category_id' => $request->category_id,
-            'type_id' => $request->type_id,
+            'task_name' => $request->task_name,
             'period_type' => $request->period_type,
             'period_start' => $request->period_start,
             'period_end' => $request->period_end,
@@ -298,9 +298,9 @@ class TaskController extends Controller
         // Load relationships
         $task->load('taskFile', 'justifFile');
         
-        // Try to load category, type relationships (columns exist in table)
+        // Try to load category, task name relationships (columns exist in table)
         try {
-            $task->load('category', 'type');
+            $task->load('category', 'taskNameRelation');
         } catch (\Exception $e) {
             // Ignore if relationships fail
         }
@@ -311,9 +311,9 @@ class TaskController extends Controller
         // Ensure justif_file raw value is included (for JSON array strings)
         $taskData['justif_file'] = $task->attributes['justif_file'] ?? $task->justif_file ?? null;
         
-        // Ensure category_id, type_id are included in response (get from attributes first to get raw database value)
+        // Ensure category_id, task_name are included in response (get from attributes first to get raw database value)
         $taskData['category_id'] = $task->getAttribute('category_id') ?? $task->attributes['category_id'] ?? null;
-        $taskData['type_id'] = $task->getAttribute('type_id') ?? $task->attributes['type_id'] ?? null;
+        $taskData['task_name'] = $task->getAttribute('task_name') ?? $task->attributes['task_name'] ?? null;
         
         // Ensure department is always a string (not a relationship object)
         // Get the raw attribute value to avoid relationship objects
@@ -497,9 +497,9 @@ class TaskController extends Controller
             // Allow null to clear category, or set new category_id
             $task->category_id = $request->category_id;
         }
-        if ($request->has('type_id')) {
-            // Allow null to clear type, or set new type_id
-            $task->type_id = $request->type_id;
+        if ($request->has('task_name')) {
+            // Allow null to clear task name, or set new task_name
+            $task->task_name = $request->task_name;
         }
         if ($request->has('period_type')) {
             $task->period_type = $request->period_type;

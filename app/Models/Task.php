@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\Category;
-use App\Models\Type;
+use App\Models\TaskName;
 use App\Models\Department;
 
 class Task extends Model
@@ -23,7 +23,7 @@ class Task extends Model
         'redirect',
         'department',
         'category_id',
-        'type_id',
+        'task_name',
         'period_type',
         'period_start',
         'period_end',
@@ -106,12 +106,12 @@ class Task extends Model
     }
 
     /**
-     * Get the type associated with the task.
-     * Note: This relationship may not exist if type_id was removed from tasks table.
+     * Get the task name associated with the task.
+     * Note: This relationship uses task_name (string) to match with TaskName model's name field.
      */
-    public function type()
+    public function taskNameRelation()
     {
-        return $this->belongsTo(Type::class, 'type_id');
+        return $this->belongsTo(TaskName::class, 'task_name', 'name');
     }
 
     /**

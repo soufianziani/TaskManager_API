@@ -30,7 +30,7 @@ class CreateTaskRequest extends FormRequest
             'redirect' => ['nullable', 'boolean'],
             'department' => ['nullable', 'string'],
             'category_id' => ['nullable', 'integer', 'exists:categories,id'],
-            'type_id' => ['nullable', 'integer', 'exists:types,id'],
+            'task_name' => ['nullable', 'string', 'max:255'],
             'period_type' => ['nullable', 'string', 'max:255'],
             'period_start' => ['nullable', 'date_format:Y-m-d H:i:s'],
             'period_end' => ['nullable', 'date_format:Y-m-d H:i:s', 'after_or_equal:period_start'],

@@ -7,7 +7,7 @@ use App\Http\Requests\SetPasswordRequest;
 use App\Http\Requests\VerifyOtpRequest;
 use App\Models\Category;
 use App\Models\Department;
-use App\Models\Type;
+use App\Models\TaskName;
 use App\Models\User;
 use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
@@ -418,23 +418,23 @@ class AuthController extends Controller
     /**
      * Get all types.
      */
-    public function getAllTypes(Request $request): JsonResponse
+    public function getAllTaskNames(Request $request): JsonResponse
     {
         $includeInactive = $request->boolean('include_inactive', false);
 
-        $typesQuery = Type::with('category');
+        $taskNamesQuery = TaskName::with('category');
         if (!$includeInactive) {
-            $typesQuery->where('is_active', true);
+            $taskNamesQuery->where('is_active', true);
         }
 
-        $types = $typesQuery
+        $taskNames = $taskNamesQuery
             ->orderBy('name', 'asc')
             ->get();
 
         return response()->json([
             'success' => true,
-            'message' => 'Types retrieved successfully',
-            'data' => $types,
+            'message' => 'Task names retrieved successfully',
+            'data' => $taskNames,
         ]);
     }
 

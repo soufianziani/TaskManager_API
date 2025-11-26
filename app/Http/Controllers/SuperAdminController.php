@@ -7,17 +7,17 @@ use App\Http\Requests\CreateCategoryRequest;
 use App\Http\Requests\CreateDepartmentRequest;
 use App\Http\Requests\CreatePermissionRequest;
 use App\Http\Requests\CreateRoleRequest;
-use App\Http\Requests\CreateTypeRequest;
+use App\Http\Requests\CreateTaskNameRequest;
 use App\Http\Requests\UpdateCategoryRequest;
 use App\Http\Requests\UpdateDepartmentRequest;
-use App\Http\Requests\UpdateTypeRequest;
+use App\Http\Requests\UpdateTaskNameRequest;
 use App\Http\Requests\UpdateRoleRequest;
 use App\Http\Requests\UpdatePermissionRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Helpers\PermissionHelper;
 use App\Models\Category;
 use App\Models\Department;
-use App\Models\Type;
+use App\Models\TaskName;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -311,7 +311,7 @@ class SuperAdminController extends Controller
      * Create a new type assigned to a department.
      * Only super_admin users can create types.
      */
-    public function createType(CreateTypeRequest $request): JsonResponse
+    public function createTaskName(CreateTaskNameRequest $request): JsonResponse
     {
         $user = $request->user();
 
@@ -319,7 +319,7 @@ class SuperAdminController extends Controller
         if ($user->type !== 'super_admin') {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admin can create types.',
+                'message' => 'Unauthorized. Only Super Admin can create task names.',
                 'data' => [
                     'user_type' => $user->type,
                     'required_type' => 'super_admin',
@@ -327,7 +327,7 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
-        $type = Type::create([
+        $taskName = TaskName::create([
             'category_id' => $request->category_id,
             'name' => $request->name,
             'icon' => $request->icon,
@@ -338,12 +338,12 @@ class SuperAdminController extends Controller
             'is_active' => $request->is_active ?? true,
         ]);
 
-        $type->load('category');
+        $taskName->load('category');
 
         return response()->json([
             'success' => true,
-            'message' => 'Type created successfully',
-            'data' => $type,
+            'message' => 'Task name created successfully',
+            'data' => $taskName,
         ], 201);
     }
 
@@ -351,14 +351,14 @@ class SuperAdminController extends Controller
      * Update an existing type.
      * Only super_admin users can update types.
      */
-    public function updateType(UpdateTypeRequest $request, int $id): JsonResponse
+    public function updateTaskName(UpdateTaskNameRequest $request, int $id): JsonResponse
     {
         $user = $request->user();
 
         if ($user->type !== 'super_admin') {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admin can update types.',
+                'message' => 'Unauthorized. Only Super Admin can update task names.',
                 'data' => [
                     'user_type' => $user->type,
                     'required_type' => 'super_admin',
@@ -366,37 +366,37 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
-        $type = Type::findOrFail($id);
+        $taskName = TaskName::findOrFail($id);
 
         if ($request->filled('category_id')) {
-            $type->category_id = $request->category_id;
+            $taskName->category_id = $request->category_id;
         }
         if ($request->filled('name')) {
-            $type->name = $request->name;
+            $taskName->name = $request->name;
         }
         if ($request->filled('icon')) {
-            $type->icon = $request->icon;
+            $taskName->icon = $request->icon;
         }
         if ($request->filled('color')) {
-            $type->color = $request->color;
+            $taskName->color = $request->color;
         }
         if ($request->has('description')) {
-            $type->description = $request->description;
+            $taskName->description = $request->description;
         }
         if ($request->has('permission')) {
-            $type->permission = $request->permission;
+            $taskName->permission = $request->permission;
         }
         if ($request->has('is_active')) {
-            $type->is_active = $request->is_active;
+            $taskName->is_active = $request->is_active;
         }
 
-        $type->save();
-        $type->load('category');
+        $taskName->save();
+        $taskName->load('category');
 
         return response()->json([
             'success' => true,
-            'message' => 'Type updated successfully',
-            'data' => $type,
+            'message' => 'Task name updated successfully',
+            'data' => $taskName,
         ], 200);
     }
 
@@ -405,14 +405,14 @@ class SuperAdminController extends Controller
      * Only super_admin users can delete types.
      * Prevent deletion if the type has tasks.
      */
-    public function deleteType(int $id): JsonResponse
+    public function deleteTaskName(int $id): JsonResponse
     {
         $user = request()->user();
 
         if ($user->type !== 'super_admin') {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Only Super Admin can delete types.',
+                'message' => 'Unauthorized. Only Super Admin can delete task names.',
                 'data' => [
                     'user_type' => $user->type,
                     'required_type' => 'super_admin',
@@ -420,17 +420,17 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
-        $type = Type::findOrFail($id);
+        $taskName = TaskName::findOrFail($id);
 
-        // Prevent deleting type if it has tasks
-        if ($type->tasks()->count() > 0) {
+        // Prevent deleting task name if it has tasks
+        if ($taskName->tasks()->count() > 0) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete type. It has associated tasks. Please deactivate it instead.',
+                'message' => 'Cannot delete task name. It has associated tasks. Please deactivate it instead.',
             ], 422);
         }
 
-        $type->delete();
+        $taskName->delete();
 
         return response()->json([
             'success' => true,
