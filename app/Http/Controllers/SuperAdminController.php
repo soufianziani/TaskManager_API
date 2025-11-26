@@ -63,19 +63,11 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
-        // Determine the permission name: explicit from request or fallback to department name
-        $permissionName = $request->permission ?: $request->name;
-
-        // Ensure a matching permission exists for this department (guard: api)
-        $permission = Permission::firstOrCreate(
-            ['name' => $permissionName, 'guard_name' => 'api'],
-            ['guard_name' => 'api']
-        );
-
         $department = Department::create([
             'name' => $request->name,
             'description' => $request->description,
-            'permission' => $permission->name,
+            // Permission is now optional and not auto-created
+            'permission' => $request->permission,
             'is_active' => $request->is_active ?? true,
             'icon' => $request->icon,
             'color' => $request->color,
@@ -203,20 +195,12 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
-        // Determine the permission name: explicit from request or fallback to category name
-        $permissionName = $request->permission ?: $request->name;
-
-        // Ensure a matching permission exists for this category (guard: api)
-        $permission = Permission::firstOrCreate(
-            ['name' => $permissionName, 'guard_name' => 'api'],
-            ['guard_name' => 'api']
-        );
-
         $category = Category::create([
             'department_id' => $request->department_id,
             'name' => $request->name,
             'description' => $request->description,
-            'permission' => $permission->name,
+            // Permission is now optional and not auto-created
+            'permission' => $request->permission,
             'is_active' => $request->is_active ?? true,
             'icon' => $request->icon,
             'color' => $request->color,
@@ -285,6 +269,45 @@ class SuperAdminController extends Controller
     }
 
     /**
+     * Delete an existing category.
+     * Only super_admin users can delete categories.
+     * Prevent deletion if the category has tasks.
+     */
+    public function deleteCategory(int $id): JsonResponse
+    {
+        $user = request()->user();
+
+        // Verify user type is super_admin
+        if ($user->type !== 'super_admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admin can delete categories.',
+                'data' => [
+                    'user_type' => $user->type,
+                    'required_type' => 'super_admin',
+                ],
+            ], 403);
+        }
+
+        $category = Category::findOrFail($id);
+
+        // Prevent deleting category if it has tasks
+        if ($category->tasks()->count() > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete category. It has associated tasks. Please deactivate it instead.',
+            ], 422);
+        }
+
+        $category->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Category deleted successfully',
+        ], 200);
+    }
+
+    /**
      * Create a new type assigned to a department.
      * Only super_admin users can create types.
      */
@@ -304,26 +327,18 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
-        // Determine the permission name: explicit from request or fallback to type name
-        $permissionName = $request->permission ?: $request->name;
-
-        // Ensure a matching permission exists for this type (guard: api)
-        $permission = Permission::firstOrCreate(
-            ['name' => $permissionName, 'guard_name' => 'api'],
-            ['guard_name' => 'api']
-        );
-
         $type = Type::create([
-            'department_id' => $request->department_id,
+            'category_id' => $request->category_id,
             'name' => $request->name,
             'icon' => $request->icon,
             'color' => $request->color,
             'description' => $request->description,
-            'permission' => $permission->name,
+            // Permission is now optional and not auto-created
+            'permission' => $request->permission,
             'is_active' => $request->is_active ?? true,
         ]);
 
-        $type->load('department');
+        $type->load('category');
 
         return response()->json([
             'success' => true,
@@ -353,8 +368,8 @@ class SuperAdminController extends Controller
 
         $type = Type::findOrFail($id);
 
-        if ($request->filled('department_id')) {
-            $type->department_id = $request->department_id;
+        if ($request->filled('category_id')) {
+            $type->category_id = $request->category_id;
         }
         if ($request->filled('name')) {
             $type->name = $request->name;
@@ -376,12 +391,50 @@ class SuperAdminController extends Controller
         }
 
         $type->save();
-        $type->load('department');
+        $type->load('category');
 
         return response()->json([
             'success' => true,
             'message' => 'Type updated successfully',
             'data' => $type,
+        ], 200);
+    }
+
+    /**
+     * Delete an existing type.
+     * Only super_admin users can delete types.
+     * Prevent deletion if the type has tasks.
+     */
+    public function deleteType(int $id): JsonResponse
+    {
+        $user = request()->user();
+
+        if ($user->type !== 'super_admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only Super Admin can delete types.',
+                'data' => [
+                    'user_type' => $user->type,
+                    'required_type' => 'super_admin',
+                ],
+            ], 403);
+        }
+
+        $type = Type::findOrFail($id);
+
+        // Prevent deleting type if it has tasks
+        if ($type->tasks()->count() > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete type. It has associated tasks. Please deactivate it instead.',
+            ], 422);
+        }
+
+        $type->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Type deleted successfully',
         ], 200);
     }
 

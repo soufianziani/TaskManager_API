@@ -23,13 +23,13 @@ class CreateTypeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'department_id' => ['required', 'exists:departments,id'],
+            'category_id' => ['required', 'exists:categories,id'],
             'name' => [
                 'required',
                 'string',
                 'max:255',
                 Rule::unique('types')->where(function ($query) {
-                    return $query->where('department_id', $this->department_id);
+                    return $query->where('category_id', $this->category_id);
                 }),
             ],
             'icon' => ['nullable', 'string', 'max:255'],

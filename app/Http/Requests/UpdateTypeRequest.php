@@ -25,17 +25,17 @@ class UpdateTypeRequest extends FormRequest
     {
         $typeId = $this->route('id');
         $existingType = $typeId ? Type::find($typeId) : null;
-        $departmentId = $this->department_id ?? $existingType?->department_id;
+        $categoryId = $this->category_id ?? $existingType?->category_id;
 
         return [
-            'department_id' => ['sometimes', 'exists:departments,id'],
+            'category_id' => ['sometimes', 'exists:categories,id'],
             'name' => [
                 'sometimes',
                 'string',
                 'max:255',
-                $departmentId
+                $categoryId
                     ? Rule::unique('types')
-                        ->where(fn($query) => $query->where('department_id', $departmentId))
+                        ->where(fn($query) => $query->where('category_id', $categoryId))
                         ->ignore($typeId)
                     : Rule::unique('types')->ignore($typeId),
             ],

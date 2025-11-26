@@ -11,8 +11,11 @@ class Type extends Model
 {
     use HasFactory;
 
+    // Map to the new underlying table name `task_name`
+    protected $table = 'task_name';
+
     protected $fillable = [
-        'department_id',
+        'category_id',
         'name',
         'icon',
         'color',
@@ -26,11 +29,11 @@ class Type extends Model
     ];
 
     /**
-     * Get the department that owns the type.
+     * Get the category that owns the type.
      */
-    public function department(): BelongsTo
+    public function category(): BelongsTo
     {
-        return $this->belongsTo(Department::class);
+        return $this->belongsTo(Category::class);
     }
 
     /**

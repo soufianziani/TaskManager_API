@@ -343,7 +343,14 @@ class AuthController extends Controller
      */
     public function getAllDepartments(Request $request): JsonResponse
     {
-        $departments = Department::where('is_active', true)
+        $includeInactive = $request->boolean('include_inactive', false);
+
+        $departmentsQuery = Department::query();
+        if (!$includeInactive) {
+            $departmentsQuery->where('is_active', true);
+        }
+
+        $departments = $departmentsQuery
             ->orderBy('name', 'asc')
             ->get();
 
@@ -390,8 +397,14 @@ class AuthController extends Controller
      */
     public function getAllCategories(Request $request): JsonResponse
     {
-        $categories = Category::with('department')
-            ->where('is_active', true)
+        $includeInactive = $request->boolean('include_inactive', false);
+
+        $categoriesQuery = Category::with('department');
+        if (!$includeInactive) {
+            $categoriesQuery->where('is_active', true);
+        }
+
+        $categories = $categoriesQuery
             ->orderBy('name', 'asc')
             ->get();
 
@@ -407,8 +420,14 @@ class AuthController extends Controller
      */
     public function getAllTypes(Request $request): JsonResponse
     {
-        $types = Type::with('department')
-            ->where('is_active', true)
+        $includeInactive = $request->boolean('include_inactive', false);
+
+        $typesQuery = Type::with('category');
+        if (!$includeInactive) {
+            $typesQuery->where('is_active', true);
+        }
+
+        $types = $typesQuery
             ->orderBy('name', 'asc')
             ->get();
 
