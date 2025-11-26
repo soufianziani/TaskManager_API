@@ -25,6 +25,8 @@ Route::post('/webhooks/whatsapp/callback', [App\Http\Controllers\OtpController::
 
 // Authentication Routes
 Route::post('/login', [App\Http\Controllers\AuthController::class, 'login']); // Email/Password login
+Route::post('/user/login', [App\Http\Controllers\AuthController::class, 'loginWithUsername']); // Username/Password login
+Route::post('/check/token', [App\Http\Controllers\AuthController::class, 'checkToken']); // Check token validity
 Route::post('/login-otp', [App\Http\Controllers\AuthController::class, 'loginWithOtp']); // OTP login
 Route::post('/register-otp', [App\Http\Controllers\AuthController::class, 'registerWithOtp']); // OTP register
 Route::post('/set-password', [App\Http\Controllers\AuthController::class, 'setPassword']); // Set password and activate user

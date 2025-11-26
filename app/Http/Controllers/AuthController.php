@@ -192,6 +192,106 @@ class AuthController extends Controller
     }
 
     /**
+     * Login user with username/password.
+     */
+    public function loginWithUsername(Request $request): JsonResponse
+    {
+        $request->validate([
+            'user_name' => 'required|string',
+            'password' => 'required',
+            'fcm_token' => 'required|string',
+            'device_id' => 'nullable|string',
+        ]);
+
+        $user = User::where('user_name', $request->user_name)->first();
+
+        if (!$user || !$user->password || !Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid username or password.',
+            ], 401);
+        }
+
+        // Check if user is active
+        if (!$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active. Please complete your registration by setting a password.',
+            ], 403);
+        }
+
+        // Prepare update data
+        $updateData = [
+            'fcm_token' => $request->fcm_token,
+        ];
+
+        // Update device_id if provided (optional)
+        if ($request->has('device_id') && $request->device_id) {
+            $updateData['device_id'] = $request->device_id;
+        }
+
+        // Save fcm_token and optional device_id
+        $user->update($updateData);
+
+        $token = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Login successful',
+            'data' => [
+                'user' => $user->load(['roles', 'permissions']),
+                'token' => $token,
+            ],
+        ]);
+    }
+
+    /**
+     * Check token validity and return user info.
+     */
+    public function checkToken(Request $request): JsonResponse
+    {
+        $request->validate([
+            'token' => 'required|string',
+        ]);
+
+        // Find the token in the database
+        $accessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($request->token);
+
+        if (!$accessToken) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired token.',
+            ], 401);
+        }
+
+        // Get the user associated with this token
+        $user = $accessToken->tokenable;
+
+        if (!$user || !$user instanceof User) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid token.',
+            ], 401);
+        }
+
+        // Check if user is active
+        if (!$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active.',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Token is valid',
+            'data' => [
+                'user' => $user->load(['roles', 'permissions']),
+            ],
+        ]);
+    }
+
+    /**
      * Logout user (revoke current token).
      */
     public function logout(Request $request): JsonResponse
