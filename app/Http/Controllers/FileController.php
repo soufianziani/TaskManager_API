@@ -22,10 +22,12 @@ class FileController extends Controller
         // Add file size and MIME type validation based on type
         switch ($type) {
             case 'video':
-                // Video files: max 500MB, allow common video MIME types
+                // Video files: max 500MB, allow all common video formats
                 $fileRules[] = 'max:512000'; // 500MB in KB
-                $fileRules[] = 'mimes:mp4,mov,avi,mkv,webm,flv,wmv,m4v,3gp,quicktime,mpg,mpeg,qt';
-                $fileRules[] = 'mimetypes:video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/x-flv,video/x-ms-wmv,video/3gpp,video/mpeg,video/x-m4v';
+                // Comprehensive list of video file extensions
+                $fileRules[] = 'mimes:mp4,mov,avi,mkv,webm,flv,wmv,m4v,3gp,mpg,mpeg,qt,asf,rm,rmvb,ogv,divx,xvid,m2v,vob,ts,mts,m2ts,f4v,amv';
+                // Comprehensive list of video MIME types
+                $fileRules[] = 'mimetypes:video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/x-flv,video/x-ms-wmv,video/3gpp,video/mpeg,video/x-m4v,video/x-ms-asf,video/vnd.rn-realvideo,video/ogg,video/divx,video/x-ms-wm,video/x-ms-wmx,video/x-ms-wvx,video/x-f4v,video/annodex';
                 break;
             case 'foto':
                 // Image files: max 50MB, allow common image MIME types
@@ -42,8 +44,10 @@ class FileController extends Controller
             case 'foto or video':
                 // Can be either image or video: max 500MB
                 $fileRules[] = 'max:512000'; // 500MB in KB
-                $fileRules[] = 'mimes:jpg,jpeg,png,gif,bmp,webp,mp4,mov,avi,mkv,webm,flv,wmv,m4v,3gp,quicktime,mpg,mpeg,qt';
-                $fileRules[] = 'mimetypes:image/jpeg,image/png,image/gif,image/bmp,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/x-flv,video/x-ms-wmv,video/3gpp,video/mpeg,video/x-m4v';
+                // Comprehensive list of image and video file extensions
+                $fileRules[] = 'mimes:jpg,jpeg,png,gif,bmp,webp,mp4,mov,avi,mkv,webm,flv,wmv,m4v,3gp,mpg,mpeg,qt,asf,rm,rmvb,ogv,divx,xvid,m2v,vob,ts,mts,m2ts,f4v,amv';
+                // Comprehensive list of image and video MIME types
+                $fileRules[] = 'mimetypes:image/jpeg,image/png,image/gif,image/bmp,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/x-flv,video/x-ms-wmv,video/3gpp,video/mpeg,video/x-m4v,video/x-ms-asf,video/vnd.rn-realvideo,video/ogg,video/divx,video/x-ms-wm,video/x-ms-wmx,video/x-ms-wvx,video/x-f4v,video/annodex';
                 break;
             default:
                 // Default: max 100MB
@@ -68,10 +72,21 @@ class FileController extends Controller
             $path = $uploadedFile->storeAs('files', $filename, 'public');
 
             // Build a public URL for the stored file.
-            // Storage::url($path) -> "/storage/files/unique_name.ext"
-            // url(...) will prepend APP_URL (e.g. https://taskmanager.wadina.agency)
-            $publicPath = Storage::url($path);          // "/storage/files/unique_name.ext"
-            $fullUrl    = url($publicPath);             // "https://taskmanager.wadina.agency/storage/files/unique_name.ext"
+            // Storage::url($path) returns "/storage/files/unique_name.ext"
+            // We need to ensure we get the full URL that works in both local and production
+            $publicPath = Storage::url($path); // "/storage/files/unique_name.ext"
+            
+            // Generate full URL using url() helper which prepends APP_URL
+            // This works consistently in both local and production environments
+            // url() automatically uses APP_URL from .env file
+            $fullUrl = url($publicPath); // "https://taskmanager.wadina.agency/storage/files/unique_name.ext"
+            
+            // Ensure we have a valid full URL (fallback if url() doesn't work)
+            if (empty($fullUrl) || !filter_var($fullUrl, FILTER_VALIDATE_URL)) {
+                // Manually construct URL from APP_URL config
+                $appUrl = rtrim(config('app.url'), '/');
+                $fullUrl = $appUrl . $publicPath;
+            }
 
             // Save file record to database with the full public URL
             $file = File::create([
