@@ -441,60 +441,77 @@ class AuthController extends Controller
     /**
      * Set password and activate user after OTP verification.
      * This endpoint is called after OTP verification during registration.
+     * Can also be used with bearer token for password reset flow.
      */
     public function setPassword(SetPasswordRequest $request): JsonResponse
     {
         try {
-        // Find user by phone number
-        $user = User::where('phone_number', $request->phone_number)->first();
+            $user = null;
 
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'User not found.',
-            ], 404);
-        }
+            // Check if user is authenticated (for password reset flow with bearer token)
+            if ($request->user()) {
+                $user = $request->user();
+            } else {
+                // Find user by phone number (for registration flow)
+                $user = User::where('phone_number', $request->phone_number)->first();
 
-        // Check if user has verified their phone number
-        if (!$user->is_number_validated) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Please verify your phone number with OTP first.',
-            ], 400);
-        }
+                if (!$user) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'User not found.',
+                    ], 404);
+                }
 
-        // Check if user already has a password and is active (already completed registration)
-            // Allow setting password if:
-            // 1. User doesn't have a password (new registration)
-            // 2. User has password but is inactive (reactivation/reset scenario)
-            // Prevent if user has password AND is active (already completed registration)
-        if ($user->password && $user->is_active) {
-            return response()->json([
-                'success' => false,
-                    'message' => 'Password already set. User is already active. Please use password reset if you need to change your password.',
-            ], 400);
-        }
+                // Check if user has verified their phone number
+                if (!$user->is_number_validated) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Please verify your phone number with OTP first.',
+                    ], 400);
+                }
 
-        // Set password and activate user
+                // Check if user already has a password and is active (already completed registration)
+                // Allow setting password if:
+                // 1. User doesn't have a password (new registration)
+                // 2. User has password but is inactive (reactivation/reset scenario)
+                // Prevent if user has password AND is active (already completed registration)
+                if ($user->password && $user->is_active) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Password already set. User is already active. Please use password reset if you need to change your password.',
+                    ], 400);
+                }
+            }
+
+            // Update FCM token if provided
+            if ($request->has('fcm_token')) {
+                $user->update(['fcm_token' => $request->fcm_token]);
+            }
+
+            // Set password and activate user (if not already active)
             // Note: User model has 'password' cast to 'hashed' (Laravel 10+), so direct assignment will auto-hash
             // Using direct assignment to avoid double-hashing
             $user->password = $request->password;
-            $user->is_active = true;
+            if (!$user->is_active) {
+                $user->is_active = true;
+            }
             $user->save();
 
-        $user->refresh();
+            $user->refresh();
 
-        // Create authentication token
-        $token = $user->createToken('auth-token')->plainTextToken;
+            // Create authentication token
+            // For registration flow: create new token
+            // For password reset flow: create new token (user is already authenticated via bearer token)
+            $token = $user->createToken('auth-token')->plainTextToken;
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Password set successfully. Account activated.',
-            'data' => [
-                'user' => $user->load(['roles', 'permissions']),
-                'token' => $token,
-            ],
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Password set successfully. Account activated.',
+                'data' => [
+                    'user' => $user->load(['roles', 'permissions']),
+                    'token' => $token,
+                ],
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -547,5 +564,119 @@ class AuthController extends Controller
                 'message' => 'An error occurred while updating the password: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Request OTP for password reset (forgot password).
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'phone_number' => ['required', 'string'],
+        ]);
+
+        // Normalize phone number
+        $normalizedPhone = $this->otpService->normalizePhoneNumber($request->phone_number);
+
+        // Find user by phone number
+        $user = User::where('phone_number', $normalizedPhone)->first();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found with this phone number.',
+            ], 404);
+        }
+
+        // Check if user is active
+        if (!$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active. Please contact support.',
+            ], 403);
+        }
+
+        // Request OTP via WhatsApp (you can also add SMS option)
+        $otpLog = $this->otpService->requestOtpViaWhatsApp(
+            $request->phone_number,
+            'password_reset',
+            $user
+        );
+
+        if ($otpLog->status === 'sent') {
+            return response()->json([
+                'success' => true,
+                'message' => 'OTP sent successfully via WhatsApp for password reset.',
+                'data' => [
+                    'user_name' => $user->user_name,
+                    'expires_at' => $otpLog->expires_at,
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to send OTP. Please try again.',
+        ], 500);
+    }
+
+    /**
+     * Verify OTP for password reset and return bearer token.
+     * After this, user should call set-password with the bearer token.
+     */
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'phone_number' => ['required', 'string'],
+            'verification_code' => ['required', 'string'],
+        ]);
+
+        // Verify OTP
+        $result = $this->otpService->verifyOtp(
+            $request->phone_number,
+            $request->verification_code,
+            'password_reset'
+        );
+
+        if (!$result['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['message'],
+            ], 400);
+        }
+
+        $user = $result['user'];
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found.',
+            ], 404);
+        }
+
+        // Check if user is active
+        if (!$user->is_active) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User account is not active.',
+            ], 403);
+        }
+
+        // Update FCM token if provided
+        if ($request->has('fcm_token')) {
+            $user->update(['fcm_token' => $request->fcm_token]);
+        }
+
+        // Create authentication token
+        $token = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OTP verified successfully. Please set your new password.',
+            'data' => [
+                'user' => $user->load(['roles', 'permissions']),
+                'token' => $token,
+            ],
+        ]);
     }
 }

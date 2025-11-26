@@ -30,6 +30,8 @@ Route::post('/check/token', [App\Http\Controllers\AuthController::class, 'checkT
 Route::post('/login-otp', [App\Http\Controllers\AuthController::class, 'loginWithOtp']); // OTP login
 Route::post('/register-otp', [App\Http\Controllers\AuthController::class, 'registerWithOtp']); // OTP register
 Route::post('/set-password', [App\Http\Controllers\AuthController::class, 'setPassword']); // Set password and activate user
+Route::post('/forgot-password', [App\Http\Controllers\AuthController::class, 'forgotPassword']); // Request OTP for password reset
+Route::post('/reset-password', [App\Http\Controllers\AuthController::class, 'resetPassword']); // Reset password with OTP verification
 Route::middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout']);
     Route::post('/update-password', [App\Http\Controllers\AuthController::class, 'updatePassword']);

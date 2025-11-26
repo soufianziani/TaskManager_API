@@ -22,8 +22,9 @@ class SetPasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'phone_number' => ['required', 'string'],
+            'phone_number' => ['nullable', 'string'], // Optional if bearer token is provided
             'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'fcm_token' => ['nullable', 'string'],
         ];
     }
 
