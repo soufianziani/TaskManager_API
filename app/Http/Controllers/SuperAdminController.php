@@ -385,7 +385,7 @@ class SuperAdminController extends Controller
     /**
      * Create a new role.
      * Only super_admin users can create roles.
-     * Automatically ensures default permissions exist and includes them in the role.
+     * Permissions are assigned ONLY if explicitly provided in the request.
      */
     public function createRole(CreateRoleRequest $request): JsonResponse
     {
@@ -404,53 +404,45 @@ class SuperAdminController extends Controller
         }
 
         $guardName = $request->guard_name ?? 'api';
-        
-        // Ensure default permissions exist
-        $this->ensureDefaultPermissionsExist();
 
         $role = Role::create([
             'name' => $request->name,
             'guard_name' => $guardName,
         ]);
 
-        // Collect permissions to assign
-        $permissionsToAssign = collect();
+        // Assign permissions ONLY if explicitly provided
+        if ($request->has('permissions')) {
+            $permissionNames = $request->permissions;
 
-        // Get default permissions
-        $defaultPermissions = $this->getDefaultPermissions($guardName);
-        $permissionsToAssign = $permissionsToAssign->merge($defaultPermissions);
+            if (is_array($permissionNames) && count($permissionNames) > 0) {
+                $permissions = Permission::whereIn('name', $permissionNames)
+                    ->where('guard_name', $guardName)
+                    ->get();
 
-        // Add custom permissions if provided
-        if ($request->has('permissions') && !empty($request->permissions)) {
-            $customPermissionNames = $request->permissions;
-            $customPermissions = Permission::whereIn('name', $customPermissionNames)
-                ->where('guard_name', $guardName)
-                ->get();
-            
-            // Create missing permissions if they don't exist
-            $foundNames = $customPermissions->pluck('name')->toArray();
-            $missingNames = array_diff($customPermissionNames, $foundNames);
-            
-            foreach ($missingNames as $missingName) {
-                $newPermission = Permission::create([
-                    'name' => $missingName,
-                    'guard_name' => $guardName,
-                ]);
-                $customPermissions->push($newPermission);
+                // Create missing permissions if they don't exist
+                $foundNames = $permissions->pluck('name')->toArray();
+                $missingNames = array_diff($permissionNames, $foundNames);
+
+                foreach ($missingNames as $missingName) {
+                    $newPermission = Permission::create([
+                        'name' => $missingName,
+                        'guard_name' => $guardName,
+                    ]);
+                    $permissions->push($newPermission);
+                }
+
+                $role->syncPermissions($permissions);
+            } else {
+                // Explicit empty array → no permissions
+                $role->syncPermissions([]);
             }
-            
-            $permissionsToAssign = $permissionsToAssign->merge($customPermissions);
         }
-
-        // Remove duplicates and sync all permissions to the role
-        $uniquePermissions = $permissionsToAssign->unique('id');
-        $role->syncPermissions($uniquePermissions);
 
         $role->load('permissions');
 
         return response()->json([
             'success' => true,
-            'message' => 'Role created successfully with default permissions',
+            'message' => 'Role created successfully',
             'data' => [
                 'role' => $role,
                 'permissions' => $role->permissions,
