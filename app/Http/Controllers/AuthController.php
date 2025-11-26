@@ -448,11 +448,48 @@ class AuthController extends Controller
         try {
             $user = null;
 
-            // Check if user is authenticated (for password reset flow with bearer token)
-            if ($request->user()) {
+            // Check if bearer token is provided (for password reset flow)
+            $bearerToken = $request->bearerToken();
+            
+            if ($bearerToken) {
+                // Manually authenticate using the bearer token
+                $accessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($bearerToken);
+                
+                if (!$accessToken) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Invalid or expired token.',
+                    ], 401);
+                }
+
+                $user = $accessToken->tokenable;
+
+                if (!$user || !$user instanceof User) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Invalid token.',
+                    ], 401);
+                }
+
+                // Check if user is active
+                if (!$user->is_active) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'User account is not active.',
+                    ], 403);
+                }
+            } elseif ($request->user()) {
+                // User authenticated via middleware (if route has auth middleware)
                 $user = $request->user();
             } else {
                 // Find user by phone number (for registration flow)
+                if (!$request->phone_number) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Phone number is required when no bearer token is provided.',
+                    ], 400);
+                }
+
                 $user = User::where('phone_number', $request->phone_number)->first();
 
                 if (!$user) {
