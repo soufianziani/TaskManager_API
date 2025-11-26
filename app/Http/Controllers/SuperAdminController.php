@@ -63,10 +63,19 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
+        // Determine the permission name: explicit from request or fallback to department name
+        $permissionName = $request->permission ?: $request->name;
+
+        // Ensure a matching permission exists for this department (guard: api)
+        $permission = Permission::firstOrCreate(
+            ['name' => $permissionName, 'guard_name' => 'api'],
+            ['guard_name' => 'api']
+        );
+
         $department = Department::create([
             'name' => $request->name,
             'description' => $request->description,
-            'permission' => $request->permission,
+            'permission' => $permission->name,
             'is_active' => $request->is_active ?? true,
             'icon' => $request->icon,
             'color' => $request->color,
@@ -186,11 +195,20 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
+        // Determine the permission name: explicit from request or fallback to category name
+        $permissionName = $request->permission ?: $request->name;
+
+        // Ensure a matching permission exists for this category (guard: api)
+        $permission = Permission::firstOrCreate(
+            ['name' => $permissionName, 'guard_name' => 'api'],
+            ['guard_name' => 'api']
+        );
+
         $category = Category::create([
             'department_id' => $request->department_id,
             'name' => $request->name,
             'description' => $request->description,
-            'permission' => $request->permission,
+            'permission' => $permission->name,
             'is_active' => $request->is_active ?? true,
             'icon' => $request->icon,
             'color' => $request->color,
@@ -278,13 +296,22 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
+        // Determine the permission name: explicit from request or fallback to type name
+        $permissionName = $request->permission ?: $request->name;
+
+        // Ensure a matching permission exists for this type (guard: api)
+        $permission = Permission::firstOrCreate(
+            ['name' => $permissionName, 'guard_name' => 'api'],
+            ['guard_name' => 'api']
+        );
+
         $type = Type::create([
             'department_id' => $request->department_id,
             'name' => $request->name,
             'icon' => $request->icon,
             'color' => $request->color,
             'description' => $request->description,
-            'permission' => $request->permission,
+            'permission' => $permission->name,
             'is_active' => $request->is_active ?? true,
         ]);
 
