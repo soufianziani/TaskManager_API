@@ -291,6 +291,7 @@ class AuthController extends Controller
     public function getAllCategories(Request $request): JsonResponse
     {
         $categories = Category::with('department')
+            ->where('is_active', true)
             ->orderBy('name', 'asc')
             ->get();
 
@@ -307,6 +308,7 @@ class AuthController extends Controller
     public function getAllTypes(Request $request): JsonResponse
     {
         $types = Type::with('department')
+            ->where('is_active', true)
             ->orderBy('name', 'asc')
             ->get();
 

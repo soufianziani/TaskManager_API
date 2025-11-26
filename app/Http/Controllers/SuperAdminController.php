@@ -159,7 +159,15 @@ class SuperAdminController extends Controller
 
         $department = Department::findOrFail($id);
 
-        // Check if department has categories or types
+        // Check if department has related tasks
+        if ($department->tasks()->count() > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete department. It has associated tasks. Please deactivate it instead.',
+            ], 422);
+        }
+
+        // Also prevent delete if it still has categories or types attached
         if ($department->categories()->count() > 0 || $department->types()->count() > 0) {
             return response()->json([
                 'success' => false,
