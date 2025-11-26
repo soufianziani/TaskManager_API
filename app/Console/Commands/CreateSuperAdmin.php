@@ -89,11 +89,22 @@ class CreateSuperAdmin extends Command
 
         $this->info('Super Admin role assigned to user.');
 
+        // Ensure default permissions exist
+        $this->info('Ensuring default permissions exist...');
+        $defaultPermissions = config('default_permissions.default_permissions', []);
+        foreach ($defaultPermissions as $permissionName) {
+            Permission::firstOrCreate(
+                ['name' => $permissionName, 'guard_name' => 'api'],
+                ['guard_name' => 'api']
+            );
+        }
+        $this->info('Default permissions ensured.');
+
         // Give all permissions to super admin role (for api guard)
         $permissions = Permission::where('guard_name', 'api')->get();
         if ($permissions->count() > 0) {
             $superAdminRole->syncPermissions($permissions);
-            $this->info('All existing permissions granted to Super Admin role.');
+            $this->info('All existing permissions (' . $permissions->count() . ') granted to Super Admin role.');
         } else {
             $this->warn('No permissions found. You can create permissions later.');
         }

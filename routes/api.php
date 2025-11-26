@@ -30,6 +30,7 @@ Route::post('/register-otp', [App\Http\Controllers\AuthController::class, 'regis
 Route::post('/set-password', [App\Http\Controllers\AuthController::class, 'setPassword']); // Set password and activate user
 Route::middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout']);
+    Route::post('/update-password', [App\Http\Controllers\AuthController::class, 'updatePassword']);
     Route::get('/user', [App\Http\Controllers\AuthController::class, 'user']);
     Route::get('/users', [App\Http\Controllers\AuthController::class, 'getAllUsers']);
     Route::get('/departments', [App\Http\Controllers\AuthController::class, 'getAllDepartments']);
@@ -37,15 +38,18 @@ Route::middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::get('/types', [App\Http\Controllers\AuthController::class, 'getAllTypes']);
     Route::get('/roles', [App\Http\Controllers\AuthController::class, 'getAllRoles']);
     Route::get('/permissions', [App\Http\Controllers\AuthController::class, 'getAllPermissions']);
-    // Allow users to update their own profile (super admin can update any user)
-    Route::put('/update-user/{id}', [SuperAdminController::class, 'updateUser']);
     // Department management (super admin or users with admin/task config permission)
     Route::post('/create-department', [SuperAdminController::class, 'createDepartment']);
     Route::put('/update-department/{id}', [SuperAdminController::class, 'updateDepartment']);
     Route::delete('/delete-department/{id}', [SuperAdminController::class, 'deleteDepartment']);
 });
 
-// Super Admin Routes
+// Super Admin Routes - allow authenticated users with proper permissions
+Route::prefix('super-admin')->middleware(['auth:sanctum', 'user.active'])->group(function () {
+    Route::put('/update-user/{id}', [SuperAdminController::class, 'updateUser']); // Requires actors permission or own profile
+});
+
+// Routes that strictly require super_admin type
 Route::prefix('super-admin')->middleware(['auth:sanctum', 'super.admin'])->group(function () {
     Route::post('/create-categorie', [SuperAdminController::class, 'createCategory']); // Note: keeping original spelling
     Route::put('/update-categorie/{id}', [SuperAdminController::class, 'updateCategory']);
@@ -73,6 +77,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(funct
     Route::get('/task-counts', [App\Http\Controllers\Admin\TaskController::class, 'getTaskCountsByType']);
     Route::get('/task-counts-status', [App\Http\Controllers\Admin\TaskController::class, 'getTaskCountsByStatus']);
     Route::get('/tasks', [App\Http\Controllers\Admin\TaskController::class, 'index']);
+    Route::get('/tasks/{id}', [App\Http\Controllers\Admin\TaskController::class, 'show']);
     Route::put('/tasks/{id}', [App\Http\Controllers\Admin\TaskController::class, 'update']);
     Route::post('/tasks/{id}/refuse', [App\Http\Controllers\Admin\TaskController::class, 'refuse']);
     Route::get('/tasks/{id}/refuse-history', [App\Http\Controllers\Admin\TaskController::class, 'getRefuseHistory']);

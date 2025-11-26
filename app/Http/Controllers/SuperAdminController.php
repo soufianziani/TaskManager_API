@@ -14,6 +14,7 @@ use App\Http\Requests\UpdateTypeRequest;
 use App\Http\Requests\UpdateRoleRequest;
 use App\Http\Requests\UpdatePermissionRequest;
 use App\Http\Requests\UpdateUserRequest;
+use App\Helpers\PermissionHelper;
 use App\Models\Category;
 use App\Models\Department;
 use App\Models\Type;
@@ -27,6 +28,23 @@ use Spatie\Permission\Models\Role;
 class SuperAdminController extends Controller
 {
     /**
+     * Ensure default permissions exist in the database.
+     * Creates them if they don't exist with the 'api' guard.
+     */
+    private function ensureDefaultPermissionsExist(): void
+    {
+        PermissionHelper::ensureDefaultPermissionsExist('api');
+    }
+
+    /**
+     * Get default permissions for a given guard.
+     */
+    private function getDefaultPermissions(string $guardName = 'api'): \Illuminate\Support\Collection
+    {
+        return PermissionHelper::getDefaultPermissionsCollection($guardName);
+    }
+
+    /**
      * Create a new department.
      * Super admin or users with "admin" or "task config" permission can create departments.
      */
@@ -34,19 +52,13 @@ class SuperAdminController extends Controller
     {
         $user = $request->user();
 
-        // Check if user is super admin or has required permissions
-        $isSuperAdmin = $user->type === 'super_admin';
-        $hasAdminPermission = $user->hasPermissionTo('admin', 'api');
-        $hasTaskConfigPermission = $user->hasPermissionTo('task config', 'api');
-
-        if (!$isSuperAdmin && !$hasAdminPermission && !$hasTaskConfigPermission) {
+        // Check if user has required permissions (super_admin bypasses automatically)
+        if (!$user->hasPermissionWithSuperAdminBypass('task config') && !$user->hasPermissionWithSuperAdminBypass('admin')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized. Super Admin or users with "admin" or "task config" permission required.',
                 'data' => [
                     'user_type' => $user->type,
-                    'has_admin_permission' => $hasAdminPermission,
-                    'has_task_config_permission' => $hasTaskConfigPermission,
                 ],
             ], 403);
         }
@@ -75,19 +87,13 @@ class SuperAdminController extends Controller
     {
         $user = $request->user();
 
-        // Check if user is super admin or has required permissions
-        $isSuperAdmin = $user->type === 'super_admin';
-        $hasAdminPermission = $user->hasPermissionTo('admin', 'api');
-        $hasTaskConfigPermission = $user->hasPermissionTo('task config', 'api');
-
-        if (!$isSuperAdmin && !$hasAdminPermission && !$hasTaskConfigPermission) {
+        // Check if user has required permissions (super_admin bypasses automatically)
+        if (!$user->hasPermissionWithSuperAdminBypass('task config') && !$user->hasPermissionWithSuperAdminBypass('admin')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized. Super Admin or users with "admin" or "task config" permission required.',
                 'data' => [
                     'user_type' => $user->type,
-                    'has_admin_permission' => $hasAdminPermission,
-                    'has_task_config_permission' => $hasTaskConfigPermission,
                 ],
             ], 403);
         }
@@ -131,19 +137,13 @@ class SuperAdminController extends Controller
     {
         $user = request()->user();
 
-        // Check if user is super admin or has required permissions
-        $isSuperAdmin = $user->type === 'super_admin';
-        $hasAdminPermission = $user->hasPermissionTo('admin', 'api');
-        $hasTaskConfigPermission = $user->hasPermissionTo('task config', 'api');
-
-        if (!$isSuperAdmin && !$hasAdminPermission && !$hasTaskConfigPermission) {
+        // Check if user has required permissions (super_admin bypasses automatically)
+        if (!$user->hasPermissionWithSuperAdminBypass('task config') && !$user->hasPermissionWithSuperAdminBypass('admin')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized. Super Admin or users with "admin" or "task config" permission required.',
                 'data' => [
                     'user_type' => $user->type,
-                    'has_admin_permission' => $hasAdminPermission,
-                    'has_task_config_permission' => $hasTaskConfigPermission,
                 ],
             ], 403);
         }
@@ -385,6 +385,7 @@ class SuperAdminController extends Controller
     /**
      * Create a new role.
      * Only super_admin users can create roles.
+     * Automatically ensures default permissions exist and includes them in the role.
      */
     public function createRole(CreateRoleRequest $request): JsonResponse
     {
@@ -402,36 +403,54 @@ class SuperAdminController extends Controller
             ], 403);
         }
 
+        $guardName = $request->guard_name ?? 'api';
+        
+        // Ensure default permissions exist
+        $this->ensureDefaultPermissionsExist();
+
         $role = Role::create([
             'name' => $request->name,
-            'guard_name' => $request->guard_name ?? 'api',
+            'guard_name' => $guardName,
         ]);
 
-        // Assign permissions to role if provided
+        // Collect permissions to assign
+        $permissionsToAssign = collect();
+
+        // Get default permissions
+        $defaultPermissions = $this->getDefaultPermissions($guardName);
+        $permissionsToAssign = $permissionsToAssign->merge($defaultPermissions);
+
+        // Add custom permissions if provided
         if ($request->has('permissions') && !empty($request->permissions)) {
-            // Ensure permissions exist with the same guard as the role
-            $permissionNames = $request->permissions;
-            $permissions = Permission::whereIn('name', $permissionNames)
-                ->where('guard_name', $role->guard_name)
+            $customPermissionNames = $request->permissions;
+            $customPermissions = Permission::whereIn('name', $customPermissionNames)
+                ->where('guard_name', $guardName)
                 ->get();
             
-            if ($permissions->count() !== count($permissionNames)) {
-                $foundNames = $permissions->pluck('name')->toArray();
-                $missingNames = array_diff($permissionNames, $foundNames);
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Some permissions not found for guard "' . $role->guard_name . '": ' . implode(', ', $missingNames),
-                ], 422);
+            // Create missing permissions if they don't exist
+            $foundNames = $customPermissions->pluck('name')->toArray();
+            $missingNames = array_diff($customPermissionNames, $foundNames);
+            
+            foreach ($missingNames as $missingName) {
+                $newPermission = Permission::create([
+                    'name' => $missingName,
+                    'guard_name' => $guardName,
+                ]);
+                $customPermissions->push($newPermission);
             }
             
-            $role->syncPermissions($permissions);
+            $permissionsToAssign = $permissionsToAssign->merge($customPermissions);
         }
+
+        // Remove duplicates and sync all permissions to the role
+        $uniquePermissions = $permissionsToAssign->unique('id');
+        $role->syncPermissions($uniquePermissions);
 
         $role->load('permissions');
 
         return response()->json([
             'success' => true,
-            'message' => 'Role created successfully',
+            'message' => 'Role created successfully with default permissions',
             'data' => [
                 'role' => $role,
                 'permissions' => $role->permissions,
@@ -496,6 +515,7 @@ class SuperAdminController extends Controller
     /**
      * Update an existing role.
      * Only super_admin users can update roles.
+     * Automatically ensures default permissions exist and includes them when updating permissions.
      */
     public function updateRole(UpdateRoleRequest $request, int $id): JsonResponse
     {
@@ -507,6 +527,9 @@ class SuperAdminController extends Controller
                 'message' => 'Unauthorized. Only Super Admin can update roles.',
             ], 403);
         }
+
+        // Ensure default permissions exist
+        $this->ensureDefaultPermissionsExist();
 
         $role = Role::findOrFail($id);
 
@@ -521,24 +544,31 @@ class SuperAdminController extends Controller
 
         // Sync permissions if provided
         if ($request->has('permissions')) {
-            if (!empty($request->permissions)) {
-                // Ensure permissions exist with the same guard as the role
-                $permissionNames = $request->permissions;
+            // Check if permissions array is explicitly provided (even if empty)
+            $permissionNames = $request->permissions;
+            
+            if (is_array($permissionNames) && count($permissionNames) > 0) {
+                // Use ONLY the permissions explicitly provided (respect user's selection)
                 $permissions = Permission::whereIn('name', $permissionNames)
                     ->where('guard_name', $role->guard_name)
                     ->get();
                 
-                if ($permissions->count() !== count($permissionNames)) {
-                    $foundNames = $permissions->pluck('name')->toArray();
-                    $missingNames = array_diff($permissionNames, $foundNames);
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Some permissions not found for guard "' . $role->guard_name . '": ' . implode(', ', $missingNames),
-                    ], 422);
+                // Create missing permissions if they don't exist
+                $foundNames = $permissions->pluck('name')->toArray();
+                $missingNames = array_diff($permissionNames, $foundNames);
+                
+                foreach ($missingNames as $missingName) {
+                    $newPermission = Permission::create([
+                        'name' => $missingName,
+                        'guard_name' => $role->guard_name,
+                    ]);
+                    $permissions->push($newPermission);
                 }
                 
+                // Sync ONLY the explicitly provided permissions
                 $role->syncPermissions($permissions);
             } else {
+                // Empty array provided - remove all permissions (respect user's choice to remove all)
                 $role->syncPermissions([]);
             }
         }
@@ -646,19 +676,47 @@ class SuperAdminController extends Controller
         $currentUser = $request->user();
         $user = User::findOrFail($id);
 
-        // Check if user is super admin or editing their own profile
-        $isSuperAdmin = $currentUser->type === 'super_admin';
+        // Check if user is super admin, has actors permission, or is editing their own profile
         $isOwnProfile = $currentUser->id === $user->id;
+        $isCurrentUserSuperAdmin = $currentUser->type === 'super_admin';
+        $hasActorsPermission = $currentUser->hasPermissionWithSuperAdminBypass('actors');
+        $targetUserIsSuperAdmin = $user->type === 'super_admin';
+        $targetUserHasActorsPermission = $user->hasPermissionWithSuperAdminBypass('actors');
 
-        if (!$isSuperAdmin && !$isOwnProfile) {
+        // Authorization check
+        if (!$hasActorsPermission && !$isOwnProfile) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. You can only edit your own profile or must be a Super Admin.',
+                'message' => 'Unauthorized. You need "actors" permission to edit users, or you can only edit your own profile.',
             ], 403);
         }
 
+        // Restriction 1: Super admin cannot update other super admins
+        if ($isCurrentUserSuperAdmin && $targetUserIsSuperAdmin && !$isOwnProfile) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Super admins cannot update other super admin users.',
+            ], 403);
+        }
+
+        // Restriction 2: Users with actors permission cannot update super admins or other users with actors permission
+        if ($hasActorsPermission && !$isCurrentUserSuperAdmin) {
+            if ($targetUserIsSuperAdmin) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized. You cannot update super admin users.',
+                ], 403);
+            }
+            if ($targetUserHasActorsPermission && !$isOwnProfile) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized. You cannot update users who have "actors" permission.',
+                ], 403);
+            }
+        }
+
         // If user is editing their own profile (not super admin), restrict certain fields
-        if ($isOwnProfile && !$isSuperAdmin) {
+        if ($isOwnProfile && !$isCurrentUserSuperAdmin) {
             // Users can only update: first_name, last_name, email, phone_number, whatsapp_number
             // They cannot update: type, is_active, roles, permissions, reset_password
             if ($request->has('type')) {

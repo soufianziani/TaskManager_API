@@ -381,4 +381,50 @@ class AuthController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Update user password (requires authentication).
+     * User must provide current password to update to a new password.
+     */
+    public function updatePassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:6', 'confirmed'],
+        ]);
+
+        $user = $request->user();
+
+        // Verify current password
+        if (!$user->password || !Hash::check($request->current_password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Current password is incorrect.',
+            ], 400);
+        }
+
+        // Check if new password is same as current password
+        if (Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'New password must be different from current password.',
+            ], 400);
+        }
+
+        try {
+            // Update password (Laravel will auto-hash it)
+            $user->password = $request->password;
+            $user->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Password updated successfully.',
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while updating the password: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

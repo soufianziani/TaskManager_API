@@ -29,6 +29,8 @@ class CreateTaskRequest extends FormRequest
             'url' => ['nullable', 'string', 'max:255'],
             'redirect' => ['nullable', 'boolean'],
             'department' => ['nullable', 'string'],
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
+            'type_id' => ['nullable', 'integer', 'exists:types,id'],
             'period_type' => ['nullable', 'string', 'max:255'],
             'period_start' => ['nullable', 'date_format:Y-m-d H:i:s'],
             'period_end' => ['nullable', 'date_format:Y-m-d H:i:s', 'after_or_equal:period_start'],
@@ -38,6 +40,8 @@ class CreateTaskRequest extends FormRequest
             'users' => ['nullable', 'string', 'max:255'],
             'step' => ['nullable', 'string', 'max:255', 'in:pending,in_progress,completed'],
             'file' => ['nullable', 'string', 'max:255'], // File ID from files table
+            'controller' => ['nullable', 'string', 'max:255'], // Controller user ID or name
+            'alarm' => ['nullable', 'string'], // Alarm times as JSON string
             // justif_file is not included - always set to null when creating
         ];
     }

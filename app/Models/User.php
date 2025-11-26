@@ -83,4 +83,46 @@ class User extends Authenticatable
     {
         return $this->hasMany(OtpLog::class);
     }
+
+    /**
+     * Check if user has a permission, with super_admin bypass.
+     * Super admin users automatically have all permissions.
+     *
+     * @param string $permission The permission name
+     * @param string|null $guardName The guard name (defaults to 'api')
+     * @return bool
+     */
+    public function hasPermissionWithSuperAdminBypass(string $permission, ?string $guardName = 'api'): bool
+    {
+        // Super admin always has all permissions
+        if ($this->type === 'super_admin') {
+            return true;
+        }
+
+        return $this->hasPermissionTo($permission, $guardName);
+    }
+
+    /**
+     * Check if user has any of the given permissions, with super_admin bypass.
+     * Super admin users automatically have all permissions.
+     *
+     * @param array $permissions Array of permission names
+     * @param string|null $guardName The guard name (defaults to 'api')
+     * @return bool
+     */
+    public function hasAnyPermissionWithSuperAdminBypass(array $permissions, ?string $guardName = 'api'): bool
+    {
+        // Super admin always has all permissions
+        if ($this->type === 'super_admin') {
+            return true;
+        }
+
+        foreach ($permissions as $permission) {
+            if ($this->hasPermissionTo($permission, $guardName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
