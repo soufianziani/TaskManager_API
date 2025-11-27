@@ -674,9 +674,9 @@ class TaskController extends Controller
                 }
             }
 
-            // Extract frequency from period_type (format: "periodic (daily)" or "periodic (weekly)" or "periodic (monthly)")
+            // Extract frequency from period_type (format: "periodic (daily)" or "periodic (weekly)" or "periodic (monthly)" etc.)
             $frequency = null;
-            if (preg_match('/periodic\s*\((\w+)\)/', $task->period_type, $matches)) {
+            if (preg_match('/periodic\s*\((daily|weekly|monthly|trimesterly|semesterly|yearly)\)/', $task->period_type, $matches)) {
                 $frequency = $matches[1];
             }
 
@@ -730,6 +730,44 @@ class TaskController extends Controller
                     // Check if current day has specific alarm time
                     if (isset($alarmData[(string)$currentDayOfMonth])) {
                         $alarmTime = $alarmData[(string)$currentDayOfMonth];
+                    } elseif (isset($alarmData['all'])) {
+                        $alarmTime = $alarmData['all'];
+                    }
+                }
+            } elseif (in_array($frequency, ['trimesterly', 'semesterly', 'yearly'])) {
+                // For yearly frequency types, check if current date matches any date in period_days
+                $periodDays = [];
+                if (!empty($task->period_days)) {
+                    $periodDaysArray = json_decode($task->period_days, true);
+                    if (is_array($periodDaysArray)) {
+                        $periodDays = $periodDaysArray;
+                    }
+                }
+                
+                // Check if current date (without time) matches any date in period_days
+                $currentDateStr = $now->format('Y-m-d');
+                $dateMatched = false;
+                
+                foreach ($periodDays as $dateStr) {
+                    try {
+                        // Parse the date string and compare dates (ignore time)
+                        $taskDate = \Carbon\Carbon::parse($dateStr);
+                        if ($taskDate->format('Y-m-d') === $currentDateStr) {
+                            $dateMatched = true;
+                            break;
+                        }
+                    } catch (\Exception $e) {
+                        // Ignore parse errors
+                        continue;
+                    }
+                }
+                
+                // Only check alarm if current date matches one of the selected dates
+                if ($dateMatched) {
+                    // For yearly types, check for date-specific time first, then fallback to 'all'
+                    // Alarm data may use YYYY-MM-DD format as keys when different times per day
+                    if (isset($alarmData[$currentDateStr])) {
+                        $alarmTime = $alarmData[$currentDateStr];
                     } elseif (isset($alarmData['all'])) {
                         $alarmTime = $alarmData['all'];
                     }
