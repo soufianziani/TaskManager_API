@@ -12,37 +12,125 @@ use Kreait\Firebase\Messaging\Notification;
 
 class NotificationController extends Controller
 {
-    private $messaging;
+    private $messaging = null;
+    private $initializationError = null;
 
-    public function __construct()
+    /**
+     * Initialize Firebase messaging (lazy loading)
+     */
+    private function getMessaging()
+    {
+        if ($this->messaging !== null) {
+            return $this->messaging;
+        }
+
+        if ($this->initializationError !== null) {
+            return null;
+        }
+
+        try {
+            $firebaseConfig = config('services.firebase');
+            
+            if (!$firebaseConfig || empty($firebaseConfig['project_id'])) {
+                throw new \Exception('Firebase configuration is missing');
+            }
+            
+            // Prepare Firebase credentials
+            $privateKey = $firebaseConfig['private_key'] ?? '';
+            
+            // Handle newlines - replace literal \n with actual newlines
+            // Handle both escaped and literal newline characters
+            if (!empty($privateKey)) {
+                // Replace escaped newlines (\n) with actual newlines
+                $privateKey = str_replace(['\\n', '\n'], "\n", $privateKey);
+                // Log private key info for debugging (first 50 chars only for security)
+                Log::debug('Firebase private key loaded', [
+                    'length' => strlen($privateKey),
+                    'starts_with' => substr($privateKey, 0, 30),
+                ]);
+            }
+            
+            $credentials = [
+                'type' => $firebaseConfig['type'] ?? 'service_account',
+                'project_id' => $firebaseConfig['project_id'],
+                'private_key_id' => $firebaseConfig['private_key_id'] ?? '',
+                'private_key' => $privateKey,
+                'client_email' => $firebaseConfig['client_email'] ?? '',
+                'client_id' => $firebaseConfig['client_id'] ?? '',
+                'auth_uri' => $firebaseConfig['auth_uri'] ?? 'https://accounts.google.com/o/oauth2/auth',
+                'token_uri' => $firebaseConfig['token_uri'] ?? 'https://oauth2.googleapis.com/token',
+                'auth_provider_x509_cert_url' => $firebaseConfig['auth_provider_x509_cert_url'] ?? 'https://www.googleapis.com/oauth2/v1/certs',
+                'client_x509_cert_url' => $firebaseConfig['client_x509_cert_url'] ?? '',
+                'universe_domain' => $firebaseConfig['universe_domain'] ?? 'googleapis.com',
+            ];
+
+            // Validate required fields
+            if (empty($credentials['private_key']) || empty($credentials['client_email'])) {
+                throw new \Exception('Firebase private_key or client_email is missing');
+            }
+
+            // Create temporary JSON file for Firebase credentials (preferred method)
+            $tempFile = tempnam(sys_get_temp_dir(), 'firebase_credentials_');
+            // Use JSON_UNESCAPED_SLASHES to preserve forward slashes and JSON_PRETTY_PRINT for readability
+            file_put_contents($tempFile, json_encode($credentials, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+            
+            try {
+                $factory = (new Factory)->withServiceAccount($tempFile);
+                $this->messaging = $factory->createMessaging();
+                
+                Log::info('Firebase messaging initialized successfully');
+                
+                return $this->messaging;
+            } finally {
+                // Clean up temporary file
+                if (file_exists($tempFile)) {
+                    @unlink($tempFile);
+                }
+            }
+        } catch (\Exception $e) {
+            $this->initializationError = $e->getMessage();
+            Log::error('Firebase initialization error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'config_available' => !empty($firebaseConfig),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Test Firebase configuration
+     */
+    public function testConfiguration(Request $request): JsonResponse
     {
         try {
             $firebaseConfig = config('services.firebase');
             
-            // Prepare Firebase credentials
-            $privateKey = $firebaseConfig['private_key'];
-            // Handle newlines - replace literal \n with actual newlines
-            $privateKey = str_replace(['\\n', '\n'], "\n", $privateKey);
+            $messaging = $this->getMessaging();
             
-            $credentials = [
-                'type' => $firebaseConfig['type'],
-                'project_id' => $firebaseConfig['project_id'],
-                'private_key_id' => $firebaseConfig['private_key_id'],
-                'private_key' => $privateKey,
-                'client_email' => $firebaseConfig['client_email'],
-                'client_id' => $firebaseConfig['client_id'],
-                'auth_uri' => $firebaseConfig['auth_uri'],
-                'token_uri' => $firebaseConfig['token_uri'],
-                'auth_provider_x509_cert_url' => $firebaseConfig['auth_provider_x509_cert_url'],
-                'client_x509_cert_url' => $firebaseConfig['client_x509_cert_url'],
-                'universe_domain' => $firebaseConfig['universe_domain'],
-            ];
-
-            $factory = (new Factory)->withServiceAccount($credentials);
-            $this->messaging = $factory->createMessaging();
+            if (!$messaging) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Firebase messaging initialization failed',
+                    'error' => $this->initializationError,
+                    'config_check' => [
+                        'config_exists' => !empty($firebaseConfig),
+                        'project_id' => $firebaseConfig['project_id'] ?? 'missing',
+                        'client_email' => !empty($firebaseConfig['client_email'] ?? ''),
+                        'private_key' => !empty($firebaseConfig['private_key'] ?? ''),
+                        'private_key_length' => strlen($firebaseConfig['private_key'] ?? ''),
+                    ],
+                ], 500);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Firebase messaging is configured correctly',
+            ]);
         } catch (\Exception $e) {
-            Log::error('Firebase initialization error: ' . $e->getMessage());
-            $this->messaging = null;
+            return response()->json([
+                'success' => false,
+                'message' => 'Error testing configuration: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -76,11 +164,12 @@ class NotificationController extends Controller
                 ], 400);
             }
 
-            // Check if Firebase messaging is initialized
-            if (!$this->messaging) {
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Firebase messaging is not configured properly.',
+                    'message' => 'Firebase messaging is not configured properly. ' . ($this->initializationError ?? 'Unknown error'),
                 ], 500);
             }
 
@@ -100,7 +189,7 @@ class NotificationController extends Controller
                 ]);
 
             // Send notification
-            $result = $this->messaging->send($message);
+            $result = $messaging->send($message);
 
             Log::info('Notification sent successfully', [
                 'user_name' => $user->user_name,
@@ -165,10 +254,12 @@ class NotificationController extends Controller
                 ], 404);
             }
 
-            if (!$this->messaging) {
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Firebase messaging is not configured properly.',
+                    'message' => 'Firebase messaging is not configured properly. ' . ($this->initializationError ?? 'Unknown error'),
                 ], 500);
             }
 
@@ -191,7 +282,7 @@ class NotificationController extends Controller
                             'user_name' => $user->user_name,
                         ]);
 
-                    $this->messaging->send($message);
+                    $messaging->send($message);
                     $successCount++;
                 } catch (\Exception $e) {
                     $failedCount++;

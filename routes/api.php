@@ -92,6 +92,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(funct
 
 // Notification Routes
 Route::prefix('notifications')->middleware(['auth:sanctum', 'user.active'])->group(function () {
+    Route::get('/test-config', [App\Http\Controllers\NotificationController::class, 'testConfiguration']);
     Route::post('/send', [App\Http\Controllers\NotificationController::class, 'sendNotification']);
     Route::post('/send-bulk', [App\Http\Controllers\NotificationController::class, 'sendBulkNotification']);
 });
