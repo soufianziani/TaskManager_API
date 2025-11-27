@@ -12,7 +12,11 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        // Check for task timeouts every minute
+        $schedule->command('tasks:check-timeouts')
+            ->everyMinute()
+            ->withoutOverlapping()
+            ->runInBackground();
     }
 
     /**

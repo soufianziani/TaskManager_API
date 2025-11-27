@@ -88,6 +88,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(funct
     Route::put('/tasks/{id}', [App\Http\Controllers\Admin\TaskController::class, 'update']);
     Route::post('/tasks/{id}/refuse', [App\Http\Controllers\Admin\TaskController::class, 'refuse']);
     Route::get('/tasks/{id}/refuse-history', [App\Http\Controllers\Admin\TaskController::class, 'getRefuseHistory']);
+    Route::post('/tasks/{id}/request-delay', [App\Http\Controllers\Admin\TaskController::class, 'requestDelay']);
 });
 
 // Notification Routes

@@ -7,6 +7,8 @@ use App\Http\Requests\CreateTaskRequest;
 use App\Models\Task;
 use App\Models\Refuse;
 use App\Models\User;
+use App\Models\Delay;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -51,6 +53,8 @@ class TaskController extends Controller
             'period_type' => $request->period_type,
             'period_start' => $request->period_start,
             'period_end' => $request->period_end,
+            'time_cloture' => $request->time_cloture,
+            'time_out' => $request->time_out,
             'period_days' => $request->period_days,
             'period_urgent' => $request->period_urgent,
             'type_justif' => $request->type_justif,
@@ -355,6 +359,25 @@ class TaskController extends Controller
 
         $tasks = $query->orderBy('created_at', 'desc')->get();
 
+        // Filter tasks that have passed timeout when step is 'pending'
+        // Only show pending tasks where timeout has been reached (if timeout is configured)
+        // Tasks without timeout configuration are excluded from this filtered view
+        if ($stepFilter === 'pending') {
+            $now = Carbon::now();
+            $tasks = $tasks->filter(function ($task) use ($now) {
+                // Task must have both time_cloture and time_out set to be considered
+                if (empty($task->time_cloture) || empty($task->time_out)) {
+                    return false; // Exclude tasks without timeout configuration
+                }
+                
+                // Calculate timeout datetime (time_cloture - time_out)
+                $timeoutDateTime = $task->calculateTimeoutDateTime();
+                
+                // Only include tasks where timeout has passed (current time >= timeout datetime)
+                return $timeoutDateTime && $now->gte($timeoutDateTime);
+            })->values(); // Reset keys after filtering
+        }
+
         // Load file information for each task
         $tasks->load('taskFile', 'justifFile');
 
@@ -617,6 +640,12 @@ class TaskController extends Controller
         }
         if ($request->has('period_end')) {
             $task->period_end = $request->period_end;
+        }
+        if ($request->has('time_cloture')) {
+            $task->time_cloture = $request->time_cloture;
+        }
+        if ($request->has('time_out')) {
+            $task->time_out = $request->time_out;
         }
         if ($request->has('period_days')) {
             $task->period_days = $request->period_days;
@@ -1290,5 +1319,121 @@ class TaskController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
         }
+    }
+
+    /**
+     * Request a delay for a task timeout notification
+     * User can request a 6-minute delay after receiving a timeout notification
+     * Maximum 5 delays allowed per user-task combination
+     */
+    public function requestDelay(Request $request, $id): JsonResponse
+    {
+        $user = $request->user();
+        $task = Task::find($id);
+
+        if (!$task) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Task not found.',
+            ], 404);
+        }
+
+        // Check if user is assigned to this task
+        $usersStr = $task->users;
+        $userIds = [];
+        $usersArray = json_decode($usersStr, true);
+        if (is_array($usersArray)) {
+            $userIds = array_map('intval', $usersArray);
+        } else {
+            preg_match_all('/["\']?(\d+)["\']?/', $usersStr, $matches);
+            if (!empty($matches[1])) {
+                $userIds = array_map('intval', $matches[1]);
+            }
+        }
+
+        if (!in_array($user->id, $userIds)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not assigned to this task.',
+            ], 403);
+        }
+
+        // Check if task has timeout notification sent
+        if (!$task->timeout_notified_at) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Task timeout notification has not been sent yet.',
+            ], 400);
+        }
+
+        // Check existing delay for this user-task combination
+        $existingDelay = Delay::where('user_id', (string)$user->id)
+            ->where('task_id', (string)$task->id)
+            ->first();
+
+        // Check if delay count has reached maximum (5)
+        if ($existingDelay && $existingDelay->count >= 5) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Maximum delay limit (5) has been reached for this task.',
+                'data' => [
+                    'current_count' => $existingDelay->count,
+                    'max_allowed' => 5,
+                ],
+            ], 400);
+        }
+
+        // Check if there's an active delay (delay_until is in the future)
+        if ($existingDelay && $existingDelay->delay_until && $existingDelay->delay_until->isFuture()) {
+            $remainingMinutes = Carbon::now()->diffInMinutes($existingDelay->delay_until, false);
+            return response()->json([
+                'success' => false,
+                'message' => "A delay is already active. Please wait {$remainingMinutes} more minute(s).",
+                'data' => [
+                    'delay_until' => $existingDelay->delay_until->toDateTimeString(),
+                    'remaining_minutes' => $remainingMinutes,
+                ],
+            ], 400);
+        }
+
+        // Create or update delay
+        $delayUntil = Carbon::now()->addMinutes(6);
+
+        if ($existingDelay) {
+            // Increment count and update delay_until
+            $existingDelay->count += 1;
+            $existingDelay->delay_until = $delayUntil;
+            $existingDelay->save();
+        } else {
+            // Create new delay
+            $existingDelay = Delay::create([
+                'user_id' => (string)$user->id,
+                'task_id' => (string)$task->id,
+                'count' => 1,
+                'delay_until' => $delayUntil,
+            ]);
+        }
+
+        // Reset timeout_notified_at so notification can be sent again after delay
+        $task->timeout_notified_at = null;
+        $task->save();
+
+        Log::info('Task delay requested', [
+            'user_id' => $user->id,
+            'task_id' => $task->id,
+            'delay_count' => $existingDelay->count,
+            'delay_until' => $delayUntil->toDateTimeString(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Delay requested successfully. Notification will be sent again after 6 minutes.',
+            'data' => [
+                'delay_id' => $existingDelay->id,
+                'delay_count' => $existingDelay->count,
+                'delay_until' => $delayUntil->toDateTimeString(),
+                'remaining_delays' => 5 - $existingDelay->count,
+            ],
+        ], 200);
     }
 }
