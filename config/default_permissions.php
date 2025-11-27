@@ -17,6 +17,9 @@ return [
         'controller',
         'actors',
         'task config',
+        'show all pending',
+        'show all processed',
+        'show all completed',
     ],
 ];
 

@@ -87,6 +87,7 @@ class TaskController extends Controller
     /**
      * Get task counts by type (pending tasks only).
      * - Super admin: sees counts for all tasks
+     * - Users with "show all pending" permission: sees counts for all pending tasks
      * - Regular users: sees counts only for their tasks
      */
     public function getTaskCountsByType(): JsonResponse
@@ -94,11 +95,14 @@ class TaskController extends Controller
         $user = request()->user();
         $userId = $user->id;
 
+        // Check if user has permission to show all pending tasks
+        $canShowAllPending = $user->hasPermissionWithSuperAdminBypass('show all pending');
+
         // Build base query
         $baseQuery = Task::where('step', 'pending');
 
-        // If user is not super_admin, filter by user ID in users field OR controller field
-        if ($user->type !== 'super_admin') {
+        // If user is not super_admin and doesn't have permission to show all pending, filter by user assignment
+        if ($user->type !== 'super_admin' && !$canShowAllPending) {
             $userName = $user->user_name;
             $userEmail = $user->email;
             
@@ -141,6 +145,7 @@ class TaskController extends Controller
     /**
      * Get task counts by status (for Quick Stats).
      * - Super admin: sees counts for all tasks
+     * - Users with "show all pending/processed/completed" permission: see all tasks with that status
      * - Regular users: sees counts only for their tasks
      */
     public function getTaskCountsByStatus(): JsonResponse
@@ -148,26 +153,98 @@ class TaskController extends Controller
         $user = request()->user();
         $userId = $user->id;
 
-        // Build base query
-        $baseQuery = Task::query();
+        // Check permissions for showing all tasks by status
+        $canShowAllPending = $user->hasPermissionWithSuperAdminBypass('show all pending');
+        $canShowAllProcessed = $user->hasPermissionWithSuperAdminBypass('show all processed');
+        $canShowAllCompleted = $user->hasPermissionWithSuperAdminBypass('show all completed');
 
-        // If user is not super_admin, filter by user ID in users field OR controller field
+        // Build base query for pending tasks
+        $pendingQuery = Task::where('step', 'pending');
+        if ($user->type !== 'super_admin' && !$canShowAllPending) {
+            $userName = $user->user_name;
+            $userEmail = $user->email;
+            $pendingQuery->where(function ($q) use ($userId, $userName, $userEmail) {
+                $q->where(function ($subQ) use ($userId) {
+                    $subQ->where('users', 'like', '%"' . $userId . '"%')
+                      ->orWhere('users', 'like', '%[' . $userId . ']%')
+                      ->orWhere('users', 'like', '%[' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ']%')
+                      ->orWhere('users', '=', '[' . $userId . ']')
+                      ->orWhere('users', '=', '["' . $userId . '"]');
+                })
+                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
+                    $subQ->where('controller', $userId)
+                      ->orWhere('controller', $userName)
+                      ->orWhere('controller', $userEmail)
+                      ->orWhere('controller', 'like', '%' . $userId . '%');
+                });
+            });
+        }
+
+        // Build base query for processed tasks
+        $processedQuery = Task::where('step', 'in_progress');
+        if ($user->type !== 'super_admin' && !$canShowAllProcessed) {
+            $userName = $user->user_name;
+            $userEmail = $user->email;
+            $processedQuery->where(function ($q) use ($userId, $userName, $userEmail) {
+                $q->where(function ($subQ) use ($userId) {
+                    $subQ->where('users', 'like', '%"' . $userId . '"%')
+                      ->orWhere('users', 'like', '%[' . $userId . ']%')
+                      ->orWhere('users', 'like', '%[' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ']%')
+                      ->orWhere('users', '=', '[' . $userId . ']')
+                      ->orWhere('users', '=', '["' . $userId . '"]');
+                })
+                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
+                    $subQ->where('controller', $userId)
+                      ->orWhere('controller', $userName)
+                      ->orWhere('controller', $userEmail)
+                      ->orWhere('controller', 'like', '%' . $userId . '%');
+                });
+            });
+        }
+
+        // Build base query for completed tasks
+        $completedQuery = Task::where('step', 'completed');
+        if ($user->type !== 'super_admin' && !$canShowAllCompleted) {
+            $userName = $user->user_name;
+            $userEmail = $user->email;
+            $completedQuery->where(function ($q) use ($userId, $userName, $userEmail) {
+                $q->where(function ($subQ) use ($userId) {
+                    $subQ->where('users', 'like', '%"' . $userId . '"%')
+                      ->orWhere('users', 'like', '%[' . $userId . ']%')
+                      ->orWhere('users', 'like', '%[' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ']%')
+                      ->orWhere('users', '=', '[' . $userId . ']')
+                      ->orWhere('users', '=', '["' . $userId . '"]');
+                })
+                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
+                    $subQ->where('controller', $userId)
+                      ->orWhere('controller', $userName)
+                      ->orWhere('controller', $userEmail)
+                      ->orWhere('controller', 'like', '%' . $userId . '%');
+                });
+            });
+        }
+
+        // Build base query for total (all tasks user can see)
+        $baseQuery = Task::query();
         if ($user->type !== 'super_admin') {
             $userName = $user->user_name;
             $userEmail = $user->email;
-            
             $baseQuery->where(function ($q) use ($userId, $userName, $userEmail) {
-                // Check if user is assigned (in users field)
                 $q->where(function ($subQ) use ($userId) {
                     $subQ->where('users', 'like', '%"' . $userId . '"%')
-                  ->orWhere('users', 'like', '%[' . $userId . ']%')
-                  ->orWhere('users', 'like', '%[' . $userId . ',%')
-                  ->orWhere('users', 'like', '%,' . $userId . ',%')
-                  ->orWhere('users', 'like', '%,' . $userId . ']%')
-                  ->orWhere('users', '=', '[' . $userId . ']')
-                  ->orWhere('users', '=', '["' . $userId . '"]');
+                      ->orWhere('users', 'like', '%[' . $userId . ']%')
+                      ->orWhere('users', 'like', '%[' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ',%')
+                      ->orWhere('users', 'like', '%,' . $userId . ']%')
+                      ->orWhere('users', '=', '[' . $userId . ']')
+                      ->orWhere('users', '=', '["' . $userId . '"]');
                 })
-                // OR check if user is controller
                 ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
                     $subQ->where('controller', $userId)
                       ->orWhere('controller', $userName)
@@ -180,9 +257,9 @@ class TaskController extends Controller
         // Get task counts by status
         $counts = [
             'total' => (clone $baseQuery)->count(),
-            'completed' => (clone $baseQuery)->where('step', 'completed')->count(),
-            'pending' => (clone $baseQuery)->where('step', 'pending')->count(),
-            'in_progress' => (clone $baseQuery)->where('step', 'in_progress')->count(),
+            'completed' => $completedQuery->count(),
+            'pending' => $pendingQuery->count(),
+            'in_progress' => $processedQuery->count(),
         ];
 
         return response()->json([
@@ -195,6 +272,7 @@ class TaskController extends Controller
     /**
      * Get all tasks with optional filtering.
      * - Super admin: sees all tasks
+     * - Users with "show all pending/processed/completed" permission: see all tasks with that status
      * - Regular users: see only tasks where their ID is in the users field
      */
     public function index(Request $request): JsonResponse
@@ -204,8 +282,24 @@ class TaskController extends Controller
         // All authenticated users can view tasks (but filtered based on type)
         $query = Task::query();
 
-        // If user is not super_admin, filter by user ID in the users field OR controller field
-        if ($user->type !== 'super_admin') {
+        // Check if user has permissions to show all tasks for specific status
+        $stepFilter = $request->has('step') && $request->step !== null ? $request->step : null;
+        $canShowAllPending = $user->hasPermissionWithSuperAdminBypass('show all pending');
+        $canShowAllProcessed = $user->hasPermissionWithSuperAdminBypass('show all processed');
+        $canShowAllCompleted = $user->hasPermissionWithSuperAdminBypass('show all completed');
+        
+        // Determine if user can see all tasks based on permission and filter
+        $canShowAllTasks = false;
+        if ($stepFilter === 'pending' && $canShowAllPending) {
+            $canShowAllTasks = true;
+        } elseif ($stepFilter === 'in_progress' && $canShowAllProcessed) {
+            $canShowAllTasks = true;
+        } elseif ($stepFilter === 'completed' && $canShowAllCompleted) {
+            $canShowAllTasks = true;
+        }
+
+        // If user is not super_admin and doesn't have permission to show all for this status, filter by user assignment
+        if ($user->type !== 'super_admin' && !$canShowAllTasks) {
             $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
