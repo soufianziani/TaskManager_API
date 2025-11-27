@@ -6,11 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CreateTaskRequest;
 use App\Models\Task;
 use App\Models\Refuse;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Kreait\Firebase\Factory;
+use Kreait\Firebase\Messaging\CloudMessage;
+use Kreait\Firebase\Messaging\Notification;
 
 class TaskController extends Controller
 {
+    private $messaging = null;
+    private $initializationError = null;
     /**
      * Create a new task.
      * Requires 'create task' permission. Super admin can always create tasks.
@@ -62,6 +69,13 @@ class TaskController extends Controller
         // Get the raw value from attributes to preserve JSON array strings
         $taskData = $task->toArray();
         $taskData['justif_file'] = $task->attributes['justif_file'] ?? $task->justif_file; // Include raw value
+
+        // Send notifications to assigned users
+        $this->sendNotificationToAssignedUsers(
+            $task,
+            'New Task Assigned',
+            "You have been assigned to a new task: {$task->name}"
+        );
 
         return response()->json([
             'success' => true,
@@ -537,8 +551,16 @@ class TaskController extends Controller
             }
         }
         
+        // Track if step changed for notification
+        $oldStep = $task->step;
+        $stepChanged = false;
+        
         if ($request->filled('step')) {
-            $task->step = $request->step;
+            $newStep = $request->step;
+            if ($oldStep !== $newStep) {
+                $task->step = $newStep;
+                $stepChanged = true;
+            }
         }
         if ($request->has('file')) {
             $task->file = $request->file;
@@ -551,6 +573,10 @@ class TaskController extends Controller
             if (empty($task->controller) && $isAssignedToUser) {
                 if ($task->step === 'pending' || $task->step === 'in_progress') {
                     // Move directly from pending/in_progress to completed when user justifies
+                    if (!$stepChanged) {
+                        $oldStep = $task->step;
+                        $stepChanged = true;
+                    }
                     $task->step = 'completed';
                 }
             }
@@ -573,6 +599,24 @@ class TaskController extends Controller
         // Reload the task to get the updated data with relationships
         $task->refresh();
         $task->load('taskFile', 'justifFile');
+
+        // Send notification if step changed
+        if ($stepChanged) {
+            $stepLabels = [
+                'pending' => 'Pending',
+                'in_progress' => 'In Progress',
+                'completed' => 'Completed'
+            ];
+            
+            $oldStepLabel = $stepLabels[$oldStep] ?? $oldStep;
+            $newStepLabel = $stepLabels[$task->step] ?? $task->step;
+            
+            $this->sendNotificationToAssignedUsers(
+                $task,
+                'Task Status Updated',
+                "Task '{$task->name}' status changed from {$oldStepLabel} to {$newStepLabel}"
+            );
+        }
 
         // Ensure justif_file raw value is included (for JSON array strings)
         // Get the raw value from attributes to preserve JSON array strings
@@ -925,6 +969,194 @@ class TaskController extends Controller
                 'success' => false,
                 'message' => 'Error retrieving refuse history: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * Initialize Firebase messaging (lazy loading)
+     */
+    private function getMessaging()
+    {
+        if ($this->messaging !== null) {
+            return $this->messaging;
+        }
+
+        if ($this->initializationError !== null) {
+            return null;
+        }
+
+        try {
+            $firebaseConfig = config('services.firebase');
+            
+            if (!$firebaseConfig || empty($firebaseConfig['project_id'])) {
+                throw new \Exception('Firebase configuration is missing');
+            }
+            
+            // Prepare Firebase credentials
+            $privateKey = $firebaseConfig['private_key'] ?? '';
+            
+            // Handle newlines - replace literal \n with actual newlines
+            if (!empty($privateKey)) {
+                $privateKey = str_replace(['\\n', '\n'], "\n", $privateKey);
+            }
+            
+            $credentials = [
+                'type' => $firebaseConfig['type'] ?? 'service_account',
+                'project_id' => $firebaseConfig['project_id'],
+                'private_key_id' => $firebaseConfig['private_key_id'] ?? '',
+                'private_key' => $privateKey,
+                'client_email' => $firebaseConfig['client_email'] ?? '',
+                'client_id' => $firebaseConfig['client_id'] ?? '',
+                'auth_uri' => $firebaseConfig['auth_uri'] ?? 'https://accounts.google.com/o/oauth2/auth',
+                'token_uri' => $firebaseConfig['token_uri'] ?? 'https://oauth2.googleapis.com/token',
+                'auth_provider_x509_cert_url' => $firebaseConfig['auth_provider_x509_cert_url'] ?? 'https://www.googleapis.com/oauth2/v1/certs',
+                'client_x509_cert_url' => $firebaseConfig['client_x509_cert_url'] ?? '',
+                'universe_domain' => $firebaseConfig['universe_domain'] ?? 'googleapis.com',
+            ];
+
+            // Validate required fields
+            if (empty($credentials['private_key']) || empty($credentials['client_email'])) {
+                throw new \Exception('Firebase private_key or client_email is missing');
+            }
+
+            // Create temporary JSON file for Firebase credentials
+            $tempFile = tempnam(sys_get_temp_dir(), 'firebase_credentials_');
+            file_put_contents($tempFile, json_encode($credentials, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+            
+            try {
+                $factory = (new Factory)->withServiceAccount($tempFile);
+                $this->messaging = $factory->createMessaging();
+                
+                Log::info('Firebase messaging initialized successfully in TaskController');
+                
+                return $this->messaging;
+            } finally {
+                // Clean up temporary file
+                if (file_exists($tempFile)) {
+                    @unlink($tempFile);
+                }
+            }
+        } catch (\Exception $e) {
+            $this->initializationError = $e->getMessage();
+            Log::error('Firebase initialization error in TaskController: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Send notification to all users assigned to a task
+     */
+    private function sendNotificationToAssignedUsers(Task $task, string $title, string $body): void
+    {
+        try {
+            // Parse users field (JSON string like "[2]" or "[2,3]" or "[\"2\"]")
+            if (empty($task->users)) {
+                Log::info('Task has no assigned users, skipping notification', ['task_id' => $task->id]);
+                return;
+            }
+
+            $usersStr = $task->users;
+            $userIds = [];
+
+            // Try to decode as JSON array
+            $usersArray = json_decode($usersStr, true);
+            if (is_array($usersArray)) {
+                // Convert all values to integers
+                $userIds = array_map('intval', $usersArray);
+            } else {
+                // Fallback: try to extract IDs from string
+                // Handle formats like "[2]", "[2,3]", "[\"2\"]"
+                preg_match_all('/["\']?(\d+)["\']?/', $usersStr, $matches);
+                if (!empty($matches[1])) {
+                    $userIds = array_map('intval', $matches[1]);
+                }
+            }
+
+            if (empty($userIds)) {
+                Log::info('No valid user IDs found in task users field', [
+                    'task_id' => $task->id,
+                    'users_field' => $usersStr
+                ]);
+                return;
+            }
+
+            // Get users with FCM tokens
+            $users = User::whereIn('id', $userIds)
+                ->whereNotNull('fcm_token')
+                ->where('fcm_token', '!=', '')
+                ->get();
+
+            if ($users->isEmpty()) {
+                Log::info('No users with FCM tokens found for task', [
+                    'task_id' => $task->id,
+                    'user_ids' => $userIds
+                ]);
+                return;
+            }
+
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
+                Log::warning('Firebase messaging not available, cannot send notifications', [
+                    'task_id' => $task->id,
+                    'error' => $this->initializationError
+                ]);
+                return;
+            }
+
+            // Create notification
+            $notification = Notification::create($title, $body);
+
+            $successCount = 0;
+            $failedCount = 0;
+
+            // Send notification to each user
+            foreach ($users as $user) {
+                try {
+                    $message = CloudMessage::withTarget('token', $user->fcm_token)
+                        ->withNotification($notification)
+                        ->withData([
+                            'title' => $title,
+                            'body' => $body,
+                            'task_id' => $task->id,
+                            'task_name' => $task->name,
+                            'task_step' => $task->step,
+                            'user_name' => $user->user_name,
+                        ]);
+
+                    $messaging->send($message);
+                    $successCount++;
+
+                    Log::info('Notification sent to user', [
+                        'user_id' => $user->id,
+                        'user_name' => $user->user_name,
+                        'task_id' => $task->id,
+                    ]);
+                } catch (\Exception $e) {
+                    $failedCount++;
+                    Log::error('Failed to send notification to user', [
+                        'user_id' => $user->id,
+                        'user_name' => $user->user_name,
+                        'task_id' => $task->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            Log::info('Task notifications sent', [
+                'task_id' => $task->id,
+                'task_name' => $task->name,
+                'success_count' => $successCount,
+                'failed_count' => $failedCount,
+                'total_users' => $users->count(),
+            ]);
+        } catch (\Exception $e) {
+            // Don't fail the task creation/update if notification fails
+            Log::error('Error sending task notifications', [
+                'task_id' => $task->id ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 }
