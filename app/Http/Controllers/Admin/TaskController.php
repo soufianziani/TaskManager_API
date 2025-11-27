@@ -377,13 +377,12 @@ class TaskController extends Controller
 
         $tasks = $query->orderBy('created_at', 'desc')->get();
 
-        // Filter tasks that have passed timeout when step is 'pending'
-        // Only show pending tasks where timeout has been reached (if timeout is configured)
-        // Tasks without timeout configuration are excluded from this filtered view
-        if ($stepFilter === 'pending') {
+        // Filter tasks that have passed timeout ONLY when timeout_passed parameter is true
+        // This is used by home page buttons, but NOT by the pending page
+        if ($stepFilter === 'pending' && $request->has('timeout_passed') && $request->timeout_passed == '1') {
             $now = Carbon::now();
             $tasks = $tasks->filter(function ($task) use ($now) {
-                // Task must have both time_cloture and time_out set to be considered
+                // Task must have both time_cloture and time_out set
                 if (empty($task->time_cloture) || empty($task->time_out)) {
                     return false; // Exclude tasks without timeout configuration
                 }
