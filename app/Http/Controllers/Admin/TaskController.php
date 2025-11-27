@@ -131,12 +131,30 @@ class TaskController extends Controller
             });
         }
 
-        // Get pending task counts by type
+        // Get all pending tasks first
+        $tasks = $baseQuery->get();
+
+        // Filter tasks that have passed timeout
+        $now = Carbon::now();
+        $filteredTasks = $tasks->filter(function ($task) use ($now) {
+            // Task must have both time_cloture and time_out set
+            if (empty($task->time_cloture) || empty($task->time_out)) {
+                return false; // Exclude tasks without timeout configuration
+            }
+            
+            // Calculate timeout datetime (time_cloture - time_out)
+            $timeoutDateTime = $task->calculateTimeoutDateTime();
+            
+            // Only include tasks where timeout has passed (current time >= timeout datetime)
+            return $timeoutDateTime && $now->gte($timeoutDateTime);
+        });
+
+        // Count by type
         $counts = [
-            'UI' => (clone $baseQuery)->where('type', 'UI')->count(),
-            'NUI' => (clone $baseQuery)->where('type', 'NUI')->count(),
-            'UNI' => (clone $baseQuery)->where('type', 'UNI')->count(),
-            'NUNI' => (clone $baseQuery)->where('type', 'NUNI')->count(),
+            'UI' => $filteredTasks->where('type', 'UI')->count(),
+            'NUI' => $filteredTasks->where('type', 'NUI')->count(),
+            'UNI' => $filteredTasks->where('type', 'UNI')->count(),
+            'NUNI' => $filteredTasks->where('type', 'NUNI')->count(),
         ];
 
         return response()->json([
