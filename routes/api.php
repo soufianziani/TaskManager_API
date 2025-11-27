@@ -89,3 +89,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(funct
     Route::post('/tasks/{id}/refuse', [App\Http\Controllers\Admin\TaskController::class, 'refuse']);
     Route::get('/tasks/{id}/refuse-history', [App\Http\Controllers\Admin\TaskController::class, 'getRefuseHistory']);
 });
+
+// Notification Routes
+Route::prefix('notifications')->middleware(['auth:sanctum', 'user.active'])->group(function () {
+    Route::post('/send', [App\Http\Controllers\NotificationController::class, 'sendNotification']);
+    Route::post('/send-bulk', [App\Http\Controllers\NotificationController::class, 'sendBulkNotification']);
+});
