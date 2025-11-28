@@ -395,6 +395,49 @@ class TaskController extends Controller
             })->values(); // Reset keys after filtering
         }
 
+        // Filter tasks that are in timeout (before closure time) when in_timeout parameter is true
+        // This is used when filtering by type (UI, NUI, UNI, NUNI) to show only tasks in timeout
+        if ($request->has('in_timeout') && $request->in_timeout == '1') {
+            $now = Carbon::now();
+            $tasks = $tasks->filter(function ($task) use ($now) {
+                // Task must have time_cloture set
+                if (empty($task->time_cloture)) {
+                    return false; // Exclude tasks without closure time
+                }
+                
+                // Parse time_cloture (can be JSON or single datetime string)
+                $timeClotureStr = $task->time_cloture;
+                $timeClotureData = json_decode($timeClotureStr, true);
+                
+                $timeCloture = null;
+                if (is_array($timeClotureData)) {
+                    // For JSON format, use the first value
+                    $firstValue = reset($timeClotureData);
+                    if (is_string($firstValue)) {
+                        try {
+                            $timeCloture = Carbon::parse($firstValue);
+                        } catch (\Exception $e) {
+                            return false;
+                        }
+                    }
+                } else {
+                    // Single datetime string
+                    try {
+                        $timeCloture = Carbon::parse($timeClotureStr);
+                    } catch (\Exception $e) {
+                        return false;
+                    }
+                }
+                
+                if (!$timeCloture) {
+                    return false;
+                }
+                
+                // Only include tasks where current time is before closure time (in timeout)
+                return $now->lt($timeCloture);
+            })->values(); // Reset keys after filtering
+        }
+
         // Load file information for each task
         $tasks->load('taskFile', 'justifFile');
 
@@ -1452,5 +1495,59 @@ class TaskController extends Controller
                 'remaining_delays' => 5 - $existingDelay->count,
             ],
         ], 200);
+    }
+
+    /**
+     * Delete a task.
+     * Only super_admin or admin can delete tasks.
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        $user = request()->user();
+
+        // Check if user is super_admin or has admin role
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated',
+            ], 401);
+        }
+
+        $isSuperAdmin = $user->type === 'super_admin';
+        $hasAdminRole = $user->hasRole('admin', 'api');
+
+        if (!$isSuperAdmin && !$hasAdminRole) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Only super admin or admin can delete tasks.',
+            ], 403);
+        }
+
+        try {
+            $task = Task::findOrFail($id);
+
+            // Delete related records (refuses, delays, etc.)
+            Refuse::where('task_id', $task->id)->delete();
+            Delay::where('task_id', $task->id)->delete();
+
+            // Delete the task
+            $task->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Task deleted successfully',
+            ], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Task not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error deleting task: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete task: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }
