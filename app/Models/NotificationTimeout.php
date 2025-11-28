@@ -6,25 +6,23 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Delay extends Model
+class NotificationTimeout extends Model
 {
     use HasFactory;
 
     protected $fillable = [
-        'user_id',
         'task_id',
-        'rest_time',
-        'rest_max',
+        'users_id',
+        'description',
     ];
 
     protected $casts = [
-        'rest_time' => 'datetime', // Will be stored as time in DB but cast as datetime for Carbon
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
 
     /**
-     * Get the task associated with the delay
+     * Get the task associated with the notification
      */
     public function task()
     {
@@ -32,10 +30,10 @@ class Delay extends Model
     }
 
     /**
-     * Get the user associated with the delay
+     * Get the user associated with the notification
      */
     public function user()
     {
-        return $this->belongsTo(User::class, 'user_id', 'id');
+        return $this->belongsTo(User::class, 'users_id', 'id');
     }
 }

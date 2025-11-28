@@ -44,6 +44,8 @@ class CreateTaskRequest extends FormRequest
             'file' => ['nullable', 'string', 'max:255'], // File ID from files table
             'controller' => ['nullable', 'string', 'max:255'], // Controller user ID or name
             'alarm' => ['nullable', 'string'], // Alarm times as JSON string
+            'rest_time' => ['nullable', 'date_format:H:i:s'], // Rest time in HH:mm:ss format
+            'rest_max' => ['nullable', 'integer', 'min:0'], // Maximum rest count
             // justif_file is not included - always set to null when creating
         ];
     }

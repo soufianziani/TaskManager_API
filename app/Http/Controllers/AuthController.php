@@ -78,11 +78,19 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        // Load roles and get all permissions (direct + via roles)
+        $user->load(['roles']);
+        // Get all permissions including those from roles
+        $allPermissions = $user->getAllPermissions();
+        
+        // Add all permissions to user object for JSON response
+        $user->setRelation('permissions', $allPermissions);
+
         return response()->json([
             'success' => true,
             'message' => 'Login successful',
             'data' => [
-                'user' => $user->load(['roles', 'permissions']),
+                'user' => $user,
                 'token' => $token,
             ],
         ]);
@@ -181,11 +189,19 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        // Load roles and get all permissions (direct + via roles)
+        $user->load(['roles']);
+        // Get all permissions including those from roles
+        $allPermissions = $user->getAllPermissions();
+        
+        // Add all permissions to user object for JSON response
+        $user->setRelation('permissions', $allPermissions);
+
         return response()->json([
             'success' => true,
             'message' => 'Login successful',
             'data' => [
-                'user' => $user->load(['roles', 'permissions']),
+                'user' => $user,
                 'token' => $token,
             ],
         ]);
@@ -235,11 +251,19 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        // Load roles and get all permissions (direct + via roles)
+        $user->load(['roles']);
+        // Get all permissions including those from roles
+        $allPermissions = $user->getAllPermissions();
+        
+        // Add all permissions to user object for JSON response
+        $user->setRelation('permissions', $allPermissions);
+
         return response()->json([
             'success' => true,
             'message' => 'Login successful',
             'data' => [
-                'user' => $user->load(['roles', 'permissions']),
+                'user' => $user,
                 'token' => $token,
             ],
         ]);
@@ -282,11 +306,19 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // Load roles and get all permissions (direct + via roles)
+        $user->load(['roles']);
+        // Get all permissions including those from roles
+        $allPermissions = $user->getAllPermissions();
+        
+        // Add all permissions to user object for JSON response
+        $user->setRelation('permissions', $allPermissions);
+
         return response()->json([
             'success' => true,
             'message' => 'Token is valid',
             'data' => [
-                'user' => $user->load(['roles', 'permissions']),
+                'user' => $user,
             ],
         ]);
     }
@@ -314,7 +346,13 @@ class AuthController extends Controller
     public function user(Request $request): JsonResponse
     {
         $user = $request->user();
-        $user->load(['roles', 'permissions']);
+        // Load roles and get all permissions (direct + via roles)
+        $user->load(['roles']);
+        // Get all permissions including those from roles
+        $allPermissions = $user->getAllPermissions();
+        
+        // Add all permissions to user object for JSON response
+        $user->setRelation('permissions', $allPermissions);
 
         return response()->json([
             'success' => true,
@@ -545,7 +583,15 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Password set successfully. Account activated.',
                 'data' => [
-                    'user' => $user->load(['roles', 'permissions']),
+                    // Load roles and get all permissions (direct + via roles)
+                $user->load(['roles']);
+                // Get all permissions including those from roles
+                $allPermissions = $user->getAllPermissions();
+                
+                // Add all permissions to user object for JSON response
+                $user->setRelation('permissions', $allPermissions);
+                
+                'user' => $user,
                     'token' => $token,
                 ],
             ]);
@@ -707,11 +753,19 @@ class AuthController extends Controller
         // Create authentication token
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        // Load roles and get all permissions (direct + via roles)
+        $user->load(['roles']);
+        // Get all permissions including those from roles
+        $allPermissions = $user->getAllPermissions();
+        
+        // Add all permissions to user object for JSON response
+        $user->setRelation('permissions', $allPermissions);
+
         return response()->json([
             'success' => true,
             'message' => 'OTP verified successfully. Please set your new password.',
             'data' => [
-                'user' => $user->load(['roles', 'permissions']),
+                'user' => $user,
                 'token' => $token,
             ],
         ]);
