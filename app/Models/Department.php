@@ -25,14 +25,6 @@ class Department extends Model
     ];
 
     /**
-     * Get all types for this department.
-     */
-    public function types(): HasMany
-    {
-        return $this->hasMany(Type::class);
-    }
-
-    /**
      * Get all categories for this department.
      */
     public function categories(): HasMany
