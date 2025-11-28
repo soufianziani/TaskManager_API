@@ -579,19 +579,19 @@ class AuthController extends Controller
             // For password reset flow: create new token (user is already authenticated via bearer token)
             $token = $user->createToken('auth-token')->plainTextToken;
 
+            // Load roles and get all permissions (direct + via roles)
+            $user->load(['roles']);
+            // Get all permissions including those from roles
+            $allPermissions = $user->getAllPermissions();
+            
+            // Add all permissions to user object for JSON response
+            $user->setRelation('permissions', $allPermissions);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Password set successfully. Account activated.',
                 'data' => [
-                    // Load roles and get all permissions (direct + via roles)
-                $user->load(['roles']);
-                // Get all permissions including those from roles
-                $allPermissions = $user->getAllPermissions();
-                
-                // Add all permissions to user object for JSON response
-                $user->setRelation('permissions', $allPermissions);
-                
-                'user' => $user,
+                    'user' => $user,
                     'token' => $token,
                 ],
             ]);
