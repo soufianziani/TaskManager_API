@@ -1527,8 +1527,9 @@ class TaskController extends Controller
             $task = Task::findOrFail($id);
 
             // Delete related records (refuses, delays, etc.)
-            Refuse::where('task_id', $task->id)->delete();
-            Delay::where('task_id', $task->id)->delete();
+            // Note: refuse table uses 'task' column (string), delays table uses 'task_id' column (string)
+            Refuse::where('task', (string)$task->id)->delete();
+            Delay::where('task_id', (string)$task->id)->delete();
 
             // Delete the task
             $task->delete();
