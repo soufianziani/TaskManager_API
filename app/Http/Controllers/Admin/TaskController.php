@@ -65,7 +65,8 @@ class TaskController extends Controller
             'controller' => $request->controller, // Controller user ID or name
             'alarm' => $request->alarm, // Alarm times as JSON string
             'rest_time' => $request->rest_time, // Rest time in HH:mm:ss format
-            'rest_max' => $request->rest_max, // Maximum rest count
+            'rest_max' => $request->rest_max,
+            'created_by' => (string)$user->id, // Store creator user ID
         ]);
 
         // Load file information
@@ -109,6 +110,7 @@ class TaskController extends Controller
 
         // If user is not super_admin and doesn't have permission to show all pending, filter by user assignment
         if ($user->type !== 'super_admin' && !$canShowAllPending) {
+            $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
             
@@ -129,7 +131,9 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                });
+                })
+                // OR check if user is the creator (created_by)
+                ->orWhere('created_by', (string)$userId);
             });
         }
 
@@ -185,6 +189,7 @@ class TaskController extends Controller
         // Build base query for pending tasks
         $pendingQuery = Task::where('step', 'pending');
         if ($user->type !== 'super_admin' && !$canShowAllPending) {
+            $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
             $pendingQuery->where(function ($q) use ($userId, $userName, $userEmail) {
@@ -202,13 +207,16 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                });
+                })
+                // OR check if user is the creator (created_by)
+                ->orWhere('created_by', (string)$userId);
             });
         }
 
         // Build base query for processed tasks
         $processedQuery = Task::where('step', 'in_progress');
         if ($user->type !== 'super_admin' && !$canShowAllProcessed) {
+            $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
             $processedQuery->where(function ($q) use ($userId, $userName, $userEmail) {
@@ -226,13 +234,16 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                });
+                })
+                // OR check if user is the creator (created_by)
+                ->orWhere('created_by', (string)$userId);
             });
         }
 
         // Build base query for completed tasks
         $completedQuery = Task::where('step', 'completed');
         if ($user->type !== 'super_admin' && !$canShowAllCompleted) {
+            $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
             $completedQuery->where(function ($q) use ($userId, $userName, $userEmail) {
@@ -250,13 +261,16 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                });
+                })
+                // OR check if user is the creator (created_by)
+                ->orWhere('created_by', (string)$userId);
             });
         }
 
         // Build base query for total (all tasks user can see)
         $baseQuery = Task::query();
         if ($user->type !== 'super_admin') {
+            $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
             $baseQuery->where(function ($q) use ($userId, $userName, $userEmail) {
@@ -274,7 +288,9 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                });
+                })
+                // OR check if user is the creator (created_by)
+                ->orWhere('created_by', (string)$userId);
             });
         }
 
@@ -331,6 +347,7 @@ class TaskController extends Controller
             // The users field is stored as JSON string like "[2]" or "[2,3]" or "[\"2\"]"
             // We need to check if the current user's ID is in that array
             // Also check if user is the controller
+            // Also check if user is the creator (created_by)
             // Try multiple formats to handle different JSON encodings
             $query->where(function ($q) use ($userId, $userName, $userEmail) {
                 // Check if user is assigned (in users field)
@@ -353,7 +370,9 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                });
+                })
+                // OR check if user is the creator (created_by)
+                ->orWhere('created_by', (string)$userId);
             });
         }
 
@@ -480,7 +499,10 @@ class TaskController extends Controller
                  $task->controller == $user->email ||
                  strpos($task->controller, (string)$user->id) !== false);
             
-            if (!$isAssignedToUser && !$isTaskController) {
+            // Check if user is the creator (creators can view their tasks even if not assigned)
+            $isCreator = !empty($task->created_by) && $task->created_by == (string)$user->id;
+            
+            if (!$isAssignedToUser && !$isTaskController && !$isCreator) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. You do not have permission to view this task.',
@@ -534,6 +556,17 @@ class TaskController extends Controller
     {
         $user = $request->user();
         $task = Task::findOrFail($id);
+
+        // Check if user is the creator of this task
+        $isCreator = !empty($task->created_by) && $task->created_by == (string)$user->id;
+        
+        // If user is the creator, they can only edit if they are super admin or have "update task" permission
+        if ($isCreator && $user->type !== 'super_admin' && !$user->hasPermissionWithSuperAdminBypass('update task')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. You created this task but do not have permission to edit it. Only super admins or users with "update task" permission can edit tasks.',
+            ], 403);
+        }
 
         $isAssignedToUser = $this->isTaskAssignedToUser($task, $user->id);
         
@@ -1439,68 +1472,74 @@ class TaskController extends Controller
             ->where('task_id', (string)$task->id)
             ->first();
 
-        // Check if delay count has reached maximum (5)
-        if ($existingDelay && $existingDelay->count >= 5) {
+        // Get rest_max from task or delay
+        $restMax = $task->rest_max ?? 0;
+        if ($existingDelay && $existingDelay->rest_max !== null) {
+            $restMax = $existingDelay->rest_max;
+        }
+
+        // Check if rest_max has reached 0 (no more delays allowed)
+        if ($restMax <= 0) {
             return response()->json([
                 'success' => false,
-                'message' => 'Maximum delay limit (5) has been reached for this task.',
+                'message' => 'Maximum rest/delay limit has been reached for this task.',
                 'data' => [
-                    'current_count' => $existingDelay->count,
-                    'max_allowed' => 5,
+                    'rest_max' => $restMax,
                 ],
             ], 400);
         }
 
-        // Check if there's an active delay (delay_until is in the future)
-        if ($existingDelay && $existingDelay->delay_until && $existingDelay->delay_until->isFuture()) {
-            $remainingMinutes = Carbon::now()->diffInMinutes($existingDelay->delay_until, false);
-            return response()->json([
-                'success' => false,
-                'message' => "A delay is already active. Please wait {$remainingMinutes} more minute(s).",
-                'data' => [
-                    'delay_until' => $existingDelay->delay_until->toDateTimeString(),
-                    'remaining_minutes' => $remainingMinutes,
-                ],
-            ], 400);
+        // Get rest_time from task or delay
+        $restTime = $task->rest_time;
+        if ($existingDelay && $existingDelay->rest_time) {
+            $restTime = $existingDelay->rest_time;
         }
 
-        // Create or update delay
-        $delayUntil = Carbon::now()->addMinutes(6);
+        // Decrement rest_max
+        $newRestMax = $restMax - 1;
+        $isLastTime = ($newRestMax == 1);
 
         if ($existingDelay) {
-            // Increment count and update delay_until
-            $existingDelay->count += 1;
-            $existingDelay->delay_until = $delayUntil;
+            // Update existing delay
+            if ($restTime) {
+                $existingDelay->rest_time = Carbon::parse($restTime);
+            }
+            $existingDelay->rest_max = $newRestMax;
             $existingDelay->save();
         } else {
             // Create new delay
             $existingDelay = Delay::create([
                 'user_id' => (string)$user->id,
                 'task_id' => (string)$task->id,
-                'count' => 1,
-                'delay_until' => $delayUntil,
+                'rest_time' => $restTime ? Carbon::parse($restTime) : null,
+                'rest_max' => $newRestMax,
             ]);
         }
 
-        // Reset timeout_notified_at so notification can be sent again after delay
+        // Reset timeout_notified_at so notification can be sent again
         $task->timeout_notified_at = null;
         $task->save();
+
+        $message = 'Rest/delay requested successfully.';
+        if ($isLastTime) {
+            $message = '⚠️ LAST TIME: Rest/delay requested successfully. This is your last rest/delay opportunity.';
+        }
 
         Log::info('Task delay requested', [
             'user_id' => $user->id,
             'task_id' => $task->id,
-            'delay_count' => $existingDelay->count,
-            'delay_until' => $delayUntil->toDateTimeString(),
+            'rest_max' => $existingDelay->rest_max,
+            'is_last_time' => $isLastTime,
         ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Delay requested successfully. Notification will be sent again after 6 minutes.',
+            'message' => $message,
             'data' => [
                 'delay_id' => $existingDelay->id,
-                'delay_count' => $existingDelay->count,
-                'delay_until' => $delayUntil->toDateTimeString(),
-                'remaining_delays' => 5 - $existingDelay->count,
+                'rest_max' => $existingDelay->rest_max,
+                'remaining_rests' => $existingDelay->rest_max,
+                'is_last_time' => $isLastTime,
             ],
         ], 200);
     }

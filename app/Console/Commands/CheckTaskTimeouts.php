@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Delay;
+use App\Models\NotificationTimeout;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Factory;
@@ -42,42 +43,8 @@ class CheckTaskTimeouts extends Command
         $skippedCount = 0;
         $delayExpiredCount = 0;
 
-        // First, check for tasks with expired delays (delay_until has passed)
-        $expiredDelays = Delay::whereNotNull('delay_until')
-            ->where('delay_until', '<=', $now)
-            ->get();
-
-        foreach ($expiredDelays as $delay) {
-            try {
-                $task = Task::find($delay->task_id);
-                if (!$task || !$task->status) {
-                    continue;
-                }
-
-                $this->info("Task #{$task->id} ({$task->name}): Delay expired. Sending notification to user #{$delay->user_id}...");
-
-                // Send notification to the specific user who requested the delay
-                $this->sendTimeoutNotificationToUser($task, (int)$delay->user_id);
-
-                // Update delay_until to null to mark it as processed
-                $delay->delay_until = null;
-                $delay->save();
-
-                // Mark task as notified
-                $task->timeout_notified_at = $now;
-                $task->save();
-
-                $delayExpiredCount++;
-                $this->info("  ✓ Notification sent after delay expiration.");
-            } catch (\Exception $e) {
-                $this->error("Error processing expired delay for task #{$delay->task_id}: " . $e->getMessage());
-                Log::error('Error processing expired delay', [
-                    'delay_id' => $delay->id,
-                    'task_id' => $delay->task_id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
+        // Note: With new delay structure (rest_time, rest_max), delays no longer have delay_until
+        // The delay logic will be handled differently - rest_max tracks remaining delays
 
         // Get all tasks with time_cloture and time_out set
         // Include tasks where timeout_notified_at is null OR where there are no active delays
@@ -86,12 +53,11 @@ class CheckTaskTimeouts extends Command
             ->where('status', true) // Only active tasks
             ->get()
             ->filter(function ($task) use ($now) {
-                // Skip if already notified and no expired delays exist
+                // Skip if already notified and no active delays exist
                 if ($task->timeout_notified_at) {
-                    // Check if there are any active delays for this task
+                    // Check if there are any active delays for this task (rest_max > 0)
                     $activeDelays = Delay::where('task_id', (string)$task->id)
-                        ->whereNotNull('delay_until')
-                        ->where('delay_until', '>', $now)
+                        ->where('rest_max', '>', 0)
                         ->exists();
                     
                     // If there are active delays, don't process this task yet
@@ -112,10 +78,9 @@ class CheckTaskTimeouts extends Command
 
         foreach ($tasks as $task) {
             try {
-                // Check if there are active delays for this task
+                // Check if there are active delays for this task (rest_max > 0)
                 $activeDelays = Delay::where('task_id', (string)$task->id)
-                    ->whereNotNull('delay_until')
-                    ->where('delay_until', '>', $now)
+                    ->where('rest_max', '>', 0)
                     ->exists();
 
                 if ($activeDelays) {
@@ -134,11 +99,11 @@ class CheckTaskTimeouts extends Command
 
                 // Check if timeout has been reached
                 if ($now->gte($timeoutDateTime)) {
-                    // Only send if not already notified (or if delay expired)
+                    // Only send if not already notified
                     if (!$task->timeout_notified_at) {
                         $this->info("Task #{$task->id} ({$task->name}): Timeout reached. Sending notification...");
 
-                        // Send notification to all assigned users
+                        // Send notification to all assigned users and create notification_timeout records
                         $this->sendTimeoutNotification($task);
 
                         // Mark as notified
@@ -326,19 +291,50 @@ class CheckTaskTimeouts extends Command
             $successCount = 0;
             $failedCount = 0;
 
-            // Send notification to each user
+            // Get rest_time and rest_max from task
+            $restTime = $task->rest_time;
+            $restMax = $task->rest_max ?? 0;
+
+            // Send notification to each user and create records
             foreach ($users as $user) {
                 try {
+                    // Create notification_timeout record
+                    NotificationTimeout::create([
+                        'task_id' => (string)$task->id,
+                        'users_id' => (string)$user->id,
+                        'description' => $body,
+                    ]);
+
+                    // Create or update delay record with rest_time and rest_max from task
+                    $delay = Delay::firstOrNew([
+                        'user_id' => (string)$user->id,
+                        'task_id' => (string)$task->id,
+                    ]);
+                    
+                    if ($restTime) {
+                        $delay->rest_time = Carbon::parse($restTime);
+                    }
+                    $delay->rest_max = $restMax;
+                    $delay->save();
+
+                    // Check if rest_max is 1 and inform user it's the last time
+                    $isLastTime = ($delay->rest_max == 1);
+                    $notificationBody = $body;
+                    if ($isLastTime) {
+                        $notificationBody = "⚠️ LAST TIME: {$body} This is your last rest/delay opportunity.";
+                    }
+
                     $message = CloudMessage::withTarget('token', $user->fcm_token)
-                        ->withNotification($notification)
+                        ->withNotification(Notification::create($title, $notificationBody))
                         ->withData([
                             'title' => $title,
-                            'body' => $body,
+                            'body' => $notificationBody,
                             'task_id' => $task->id,
                             'task_name' => $task->name,
                             'task_step' => $task->step,
                             'user_name' => $user->user_name,
                             'notification_type' => 'timeout',
+                            'is_last_time' => $isLastTime,
                         ]);
 
                     $messaging->send($message);
@@ -348,6 +344,8 @@ class CheckTaskTimeouts extends Command
                         'user_id' => $user->id,
                         'user_name' => $user->user_name,
                         'task_id' => $task->id,
+                        'rest_max' => $delay->rest_max,
+                        'is_last_time' => $isLastTime,
                     ]);
                 } catch (\Exception $e) {
                     $failedCount++;

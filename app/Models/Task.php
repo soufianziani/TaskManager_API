@@ -39,6 +39,9 @@ class Task extends Model
         'justif_file',
         'controller',
         'alarm',
+        'rest_time',
+        'rest_max',
+        'created_by',
     ];
 
     protected $casts = [
