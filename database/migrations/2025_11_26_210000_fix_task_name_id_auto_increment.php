@@ -12,8 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         if (Schema::hasTable('task_name') && Schema::hasColumn('task_name', 'id')) {
-            // Make sure the id column is BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY
-            DB::statement('ALTER TABLE `task_name` MODIFY `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY');
+            // Make sure the id column is BIGINT UNSIGNED AUTO_INCREMENT
+            // Don't specify PRIMARY KEY as it already exists
+            DB::statement('ALTER TABLE `task_name` MODIFY `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT');
         }
     }
 
