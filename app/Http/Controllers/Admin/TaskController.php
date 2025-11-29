@@ -64,6 +64,8 @@ class TaskController extends Controller
             'justif_file' => null, // Always null when creating task
             'controller' => $request->controller, // Controller user ID or name
             'alarm' => $request->alarm, // Alarm times as JSON string
+            'rest_time' => $request->rest_time, // Rest time in HH:mm:ss format
+            'rest_max' => $request->rest_max, // Maximum rest count
         ]);
 
         // Load file information
@@ -775,6 +777,12 @@ class TaskController extends Controller
         }
         if ($request->has('alarm')) {
             $task->alarm = $request->alarm;
+        }
+        if ($request->has('rest_time')) {
+            $task->rest_time = $request->rest_time;
+        }
+        if ($request->has('rest_max')) {
+            $task->rest_max = $request->rest_max;
         }
 
         $task->save();
