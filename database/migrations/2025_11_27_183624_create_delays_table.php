@@ -11,18 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('delays', function (Blueprint $table) {
-            $table->id();
-            $table->string('user_id', 255);
-            $table->string('task_id', 255);
-            $table->integer('count')->default(1);
-            $table->timestamp('delay_until')->nullable(); // When the delay expires (6 minutes from creation)
-            $table->timestamps();
-            
-            // Indexes for faster queries
-            $table->index(['user_id', 'task_id']);
-            $table->index('delay_until');
-        });
+        if (!Schema::hasTable('delays')) {
+            Schema::create('delays', function (Blueprint $table) {
+                $table->id();
+                $table->string('user_id', 255);
+                $table->string('task_id', 255);
+                $table->integer('count')->default(1);
+                $table->timestamp('delay_until')->nullable(); // When the delay expires (6 minutes from creation)
+                $table->timestamps();
+                
+                // Indexes for faster queries
+                $table->index(['user_id', 'task_id']);
+                $table->index('delay_until');
+            });
+        }
     }
 
     /**
