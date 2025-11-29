@@ -36,7 +36,6 @@ class CreateTaskRequest extends FormRequest
             'period_end' => ['nullable', 'date_format:Y-m-d H:i:s', 'after_or_equal:period_start'],
             'time_cloture' => ['nullable', 'date_format:H:i:s'], // Time format: HH:mm:ss
             'time_out' => ['nullable', 'date_format:H:i:s'], // Time format: HH:mm:ss
-            'days_between' => ['nullable', 'integer', 'min:0'], // Number of days between start and end times
             'period_days' => ['nullable', 'string'],
             'period_urgent' => ['nullable', 'string'],
             'type_justif' => ['nullable', 'string'],
@@ -59,7 +58,6 @@ class CreateTaskRequest extends FormRequest
         $validator->after(function ($validator) {
             $timeCloture = $this->input('time_cloture');
             $timeOut = $this->input('time_out');
-            $daysBetween = $this->input('days_between', 0);
 
             // Validate that if time_cloture is set, time_out should also be set
             if ($timeCloture && !$timeOut) {
@@ -93,8 +91,8 @@ class CreateTaskRequest extends FormRequest
                         $timeClotureHour = (int)$timeClotureParts[0];
                         $timeOutHour = (int)$timeOutParts[0];
                         
-                        // If days_between is 0, end time should be after start time on the same day
-                        if ($daysBetween == 0 && $timeClotureHour <= $timeOutHour) {
+                        // End time should be after start time on the same day
+                        if ($timeClotureHour <= $timeOutHour) {
                             // Check minutes if hours are equal
                             if ($timeClotureHour == $timeOutHour) {
                                 $timeClotureMin = (int)$timeClotureParts[1];
@@ -102,13 +100,13 @@ class CreateTaskRequest extends FormRequest
                                 if ($timeClotureMin <= $timeOutMin) {
                                     $validator->errors()->add(
                                         'time_cloture',
-                                        'Task end time must be after task start time when days between is 0.'
+                                        'Task end time must be after task start time.'
                                     );
                                 }
                             } else {
                                 $validator->errors()->add(
                                     'time_cloture',
-                                    'Task end time must be after task start time when days between is 0.'
+                                    'Task end time must be after task start time.'
                                 );
                             }
                         }

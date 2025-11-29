@@ -12,9 +12,6 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('tasks', function (Blueprint $table) {
-            // Add days_between column first
-            $table->integer('days_between')->nullable()->after('time_out');
-            
             // Change time_cloture from mediumtext to time
             $table->time('time_cloture')->nullable()->change();
             
@@ -34,9 +31,6 @@ return new class extends Migration
             
             // Revert time_out back to mediumtext
             $table->mediumText('time_out')->nullable()->change();
-            
-            // Drop days_between column
-            $table->dropColumn('days_between');
         });
     }
 };

@@ -29,7 +29,6 @@ class Task extends Model
         'period_end',
         'time_cloture',
         'time_out',
-        'days_between',
         'timeout_notified_at',
         'period_days',
         'period_urgent',
@@ -134,13 +133,12 @@ class Task extends Model
     }
 
     /**
-     * Calculate timeout datetime from time_cloture, time_out, and days_between
+     * Calculate timeout datetime from time_cloture and time_out
      * Returns null if calculation is not possible
      * 
      * Logic:
      * - time_out is the task start time (e.g., "09:00:00")
      * - time_cloture is the task end time (e.g., "14:30:00")
-     * - days_between is the number of days between start and end
      * - Uses period_start as the base date, or current date if period_start is not set
      */
     public function calculateTimeoutDateTime(): ?\Carbon\Carbon
@@ -191,7 +189,7 @@ class Task extends Model
     }
 
     /**
-     * Calculate task end datetime from time_cloture and days_between
+     * Calculate task end datetime from time_cloture
      * Returns null if calculation is not possible
      */
     public function calculateEndDateTime(): ?\Carbon\Carbon
@@ -230,12 +228,8 @@ class Task extends Model
             $endMinute = (int)$timeClotureParts[1];
             $endSecond = isset($timeClotureParts[2]) ? (int)$timeClotureParts[2] : 0;
             
-            // Get days_between (default to 0 if not set)
-            $daysBetween = $this->days_between ?? 0;
-            
-            // Create end datetime
+            // Create end datetime (same day as base date)
             $endDateTime = $baseDate->copy()
-                ->addDays($daysBetween)
                 ->setTime($endHour, $endMinute, $endSecond);
             
             return $endDateTime;

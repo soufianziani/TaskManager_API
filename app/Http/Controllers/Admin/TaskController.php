@@ -55,7 +55,6 @@ class TaskController extends Controller
             'period_end' => $request->period_end,
             'time_cloture' => $request->time_cloture,
             'time_out' => $request->time_out,
-            'days_between' => $request->days_between ?? 0,
             'period_days' => $request->period_days,
             'period_urgent' => $request->period_urgent,
             'type_justif' => $request->type_justif,
@@ -427,7 +426,7 @@ class TaskController extends Controller
                     return false; // Exclude tasks without closure time
                 }
                 
-                // Calculate end datetime from time_cloture and days_between
+                // Calculate end datetime from time_cloture
                 $endDateTime = $task->calculateEndDateTime();
                 
                 if (!$endDateTime) {
@@ -721,9 +720,6 @@ class TaskController extends Controller
         }
         if ($request->has('time_out')) {
             $task->time_out = $request->time_out;
-        }
-        if ($request->has('days_between')) {
-            $task->days_between = $request->days_between ?? 0;
         }
         if ($request->has('period_days')) {
             $task->period_days = $request->period_days;
