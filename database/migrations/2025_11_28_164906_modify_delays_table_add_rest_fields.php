@@ -11,14 +11,25 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('delays', function (Blueprint $table) {
-            // Drop old columns
-            $table->dropColumn(['count', 'delay_until']);
-            
-            // Add new columns
-            $table->time('rest_time')->nullable()->after('task_id');
-            $table->integer('rest_max')->default(0)->after('rest_time');
-        });
+        if (Schema::hasTable('delays')) {
+            Schema::table('delays', function (Blueprint $table) {
+                // Drop old columns if they exist
+                if (Schema::hasColumn('delays', 'count')) {
+                    $table->dropColumn('count');
+                }
+                if (Schema::hasColumn('delays', 'delay_until')) {
+                    $table->dropColumn('delay_until');
+                }
+                
+                // Add new columns if they don't exist
+                if (!Schema::hasColumn('delays', 'rest_time')) {
+                    $table->time('rest_time')->nullable()->after('task_id');
+                }
+                if (!Schema::hasColumn('delays', 'rest_max')) {
+                    $table->integer('rest_max')->default(0)->after('rest_time');
+                }
+            });
+        }
     }
 
     /**

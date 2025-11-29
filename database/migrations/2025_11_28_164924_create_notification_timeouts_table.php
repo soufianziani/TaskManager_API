@@ -11,16 +11,18 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('notification_timeouts', function (Blueprint $table) {
-            $table->id();
-            $table->string('task_id', 255);
-            $table->string('users_id', 255);
-            $table->text('description')->nullable();
-            $table->timestamps();
-            
-            // Indexes for faster queries
-            $table->index(['task_id', 'users_id']);
-        });
+        if (!Schema::hasTable('notification_timeouts')) {
+            Schema::create('notification_timeouts', function (Blueprint $table) {
+                $table->id();
+                $table->string('task_id', 255);
+                $table->string('users_id', 255);
+                $table->text('description')->nullable();
+                $table->timestamps();
+                
+                // Indexes for faster queries
+                $table->index(['task_id', 'users_id']);
+            });
+        }
     }
 
     /**

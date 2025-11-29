@@ -12,7 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('tasks', function (Blueprint $table) {
-            $table->text('alarm')->nullable()->after('period_days'); // Store alarm times as JSON string
+            if (!Schema::hasColumn('tasks', 'alarm')) {
+                $table->text('alarm')->nullable()->after('period_days'); // Store alarm times as JSON string
+            }
         });
     }
 
