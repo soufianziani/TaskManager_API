@@ -55,6 +55,7 @@ class TaskController extends Controller
             'period_end' => $request->period_end,
             'time_cloture' => $request->time_cloture,
             'time_out' => $request->time_out,
+            'days_between' => $request->days_between ?? 0,
             'period_days' => $request->period_days,
             'period_urgent' => $request->period_urgent,
             'type_justif' => $request->type_justif,
@@ -426,36 +427,15 @@ class TaskController extends Controller
                     return false; // Exclude tasks without closure time
                 }
                 
-                // Parse time_cloture (can be JSON or single datetime string)
-                $timeClotureStr = $task->time_cloture;
-                $timeClotureData = json_decode($timeClotureStr, true);
+                // Calculate end datetime from time_cloture and days_between
+                $endDateTime = $task->calculateEndDateTime();
                 
-                $timeCloture = null;
-                if (is_array($timeClotureData)) {
-                    // For JSON format, use the first value
-                    $firstValue = reset($timeClotureData);
-                    if (is_string($firstValue)) {
-                        try {
-                            $timeCloture = Carbon::parse($firstValue);
-                        } catch (\Exception $e) {
-                            return false;
-                        }
-                    }
-                } else {
-                    // Single datetime string
-                    try {
-                        $timeCloture = Carbon::parse($timeClotureStr);
-                    } catch (\Exception $e) {
-                        return false;
-                    }
-                }
-                
-                if (!$timeCloture) {
+                if (!$endDateTime) {
                     return false;
                 }
                 
                 // Only include tasks where current time is before closure time (in timeout)
-                return $now->lt($timeCloture);
+                return $now->lt($endDateTime);
             })->values(); // Reset keys after filtering
         }
 
@@ -741,6 +721,9 @@ class TaskController extends Controller
         }
         if ($request->has('time_out')) {
             $task->time_out = $request->time_out;
+        }
+        if ($request->has('days_between')) {
+            $task->days_between = $request->days_between ?? 0;
         }
         if ($request->has('period_days')) {
             $task->period_days = $request->period_days;

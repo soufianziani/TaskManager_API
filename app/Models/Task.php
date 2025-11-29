@@ -29,6 +29,7 @@ class Task extends Model
         'period_end',
         'time_cloture',
         'time_out',
+        'days_between',
         'timeout_notified_at',
         'period_days',
         'period_urgent',
@@ -47,6 +48,8 @@ class Task extends Model
     protected $casts = [
         'period_start' => 'datetime',
         'period_end' => 'datetime',
+        'time_cloture' => 'datetime', // Cast as datetime for easier manipulation
+        'time_out' => 'datetime', // Cast as datetime for easier manipulation
         'timeout_notified_at' => 'datetime',
         'status' => 'boolean',
         'redirect' => 'boolean',
@@ -131,53 +134,14 @@ class Task extends Model
     }
 
     /**
-     * Parse time_out string to get days, hours, and minutes
-     * Supports formats like "2 days, 3 hours, 5 mins" or JSON format
-     */
-    public function parseTimeOut(?string $timeOutStr): ?array
-    {
-        if (empty($timeOutStr)) {
-            return null;
-        }
-
-        // Try to parse as JSON first
-        $timeOutData = json_decode($timeOutStr, true);
-        if (is_array($timeOutData)) {
-            // Return the first value if it's a JSON object (for per-day timeouts)
-            // For now, we'll use the first entry or return null
-            // This can be enhanced later for per-day timeout handling
-            return null;
-        }
-
-        // Parse format like "2 days, 3 hours, 5 mins"
-        $days = 0;
-        $hours = 0;
-        $minutes = 0;
-
-        if (preg_match('/(\d+)\s+days?/i', $timeOutStr, $matches)) {
-            $days = (int)$matches[1];
-        }
-        if (preg_match('/(\d+)\s+hours?/i', $timeOutStr, $matches)) {
-            $hours = (int)$matches[1];
-        }
-        if (preg_match('/(\d+)\s+mins?/i', $timeOutStr, $matches)) {
-            $minutes = (int)$matches[1];
-        }
-
-        if ($days == 0 && $hours == 0 && $minutes == 0) {
-            return null;
-        }
-
-        return [
-            'days' => $days,
-            'hours' => $hours,
-            'minutes' => $minutes,
-        ];
-    }
-
-    /**
-     * Calculate timeout datetime from time_cloture and time_out
+     * Calculate timeout datetime from time_cloture, time_out, and days_between
      * Returns null if calculation is not possible
+     * 
+     * Logic:
+     * - time_out is the task start time (e.g., "09:00:00")
+     * - time_cloture is the task end time (e.g., "14:30:00")
+     * - days_between is the number of days between start and end
+     * - Uses period_start as the base date, or current date if period_start is not set
      */
     public function calculateTimeoutDateTime(): ?\Carbon\Carbon
     {
@@ -185,46 +149,98 @@ class Task extends Model
             return null;
         }
 
-        // Parse time_cloture (can be JSON or single datetime string)
-        $timeClotureStr = $this->time_cloture;
-        $timeClotureData = json_decode($timeClotureStr, true);
-        
-        $timeCloture = null;
-        if (is_array($timeClotureData)) {
-            // For JSON format, use the first value (or could be enhanced for per-day)
-            $firstValue = reset($timeClotureData);
-            if (is_string($firstValue)) {
-                try {
-                    $timeCloture = \Carbon\Carbon::parse($firstValue);
-                } catch (\Exception $e) {
-                    return null;
-                }
+        // Get base date from period_start or use current date
+        $baseDate = null;
+        if (!empty($this->period_start)) {
+            try {
+                $baseDate = \Carbon\Carbon::parse($this->period_start)->startOfDay();
+            } catch (\Exception $e) {
+                $baseDate = \Carbon\Carbon::now()->startOfDay();
             }
         } else {
-            // Single datetime string
-            try {
-                $timeCloture = \Carbon\Carbon::parse($timeClotureStr);
-            } catch (\Exception $e) {
+            $baseDate = \Carbon\Carbon::now()->startOfDay();
+        }
+
+        // Parse time_out (task start time) - format: "HH:mm:ss" or "HH:mm"
+        $timeOutStr = $this->time_out;
+        if (is_object($timeOutStr) && method_exists($timeOutStr, 'format')) {
+            // Already a Carbon instance, get time string
+            $timeOutStr = $timeOutStr->format('H:i:s');
+        }
+        
+        try {
+            // Parse time string (e.g., "09:00:00" or "09:00")
+            $timeOutParts = explode(':', $timeOutStr);
+            if (count($timeOutParts) < 2) {
                 return null;
             }
+            
+            $startHour = (int)$timeOutParts[0];
+            $startMinute = (int)$timeOutParts[1];
+            $startSecond = isset($timeOutParts[2]) ? (int)$timeOutParts[2] : 0;
+            
+            // Create start datetime
+            $startDateTime = $baseDate->copy()
+                ->setTime($startHour, $startMinute, $startSecond);
+            
+            // The start datetime is the timeout datetime (when to send notification)
+            return $startDateTime;
+        } catch (\Exception $e) {
+            return null;
         }
+    }
 
-        if (!$timeCloture) {
+    /**
+     * Calculate task end datetime from time_cloture and days_between
+     * Returns null if calculation is not possible
+     */
+    public function calculateEndDateTime(): ?\Carbon\Carbon
+    {
+        if (empty($this->time_cloture)) {
             return null;
         }
 
-        // Parse time_out
-        $timeOutData = $this->parseTimeOut($this->time_out);
-        if (!$timeOutData) {
-            return null;
+        // Get base date from period_start or use current date
+        $baseDate = null;
+        if (!empty($this->period_start)) {
+            try {
+                $baseDate = \Carbon\Carbon::parse($this->period_start)->startOfDay();
+            } catch (\Exception $e) {
+                $baseDate = \Carbon\Carbon::now()->startOfDay();
+            }
+        } else {
+            $baseDate = \Carbon\Carbon::now()->startOfDay();
         }
 
-        // Calculate timeout datetime (time_cloture - time_out)
-        $timeout = $timeCloture->copy()
-            ->subDays($timeOutData['days'])
-            ->subHours($timeOutData['hours'])
-            ->subMinutes($timeOutData['minutes']);
-
-        return $timeout;
+        // Parse time_cloture (task end time) - format: "HH:mm:ss" or "HH:mm"
+        $timeClotureStr = $this->time_cloture;
+        if (is_object($timeClotureStr) && method_exists($timeClotureStr, 'format')) {
+            // Already a Carbon instance, get time string
+            $timeClotureStr = $timeClotureStr->format('H:i:s');
+        }
+        
+        try {
+            // Parse time string (e.g., "14:30:00" or "14:30")
+            $timeClotureParts = explode(':', $timeClotureStr);
+            if (count($timeClotureParts) < 2) {
+                return null;
+            }
+            
+            $endHour = (int)$timeClotureParts[0];
+            $endMinute = (int)$timeClotureParts[1];
+            $endSecond = isset($timeClotureParts[2]) ? (int)$timeClotureParts[2] : 0;
+            
+            // Get days_between (default to 0 if not set)
+            $daysBetween = $this->days_between ?? 0;
+            
+            // Create end datetime
+            $endDateTime = $baseDate->copy()
+                ->addDays($daysBetween)
+                ->setTime($endHour, $endMinute, $endSecond);
+            
+            return $endDateTime;
+        } catch (\Exception $e) {
+            return null;
+        }
     }
 }

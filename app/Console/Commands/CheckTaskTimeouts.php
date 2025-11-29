@@ -257,30 +257,9 @@ class CheckTaskTimeouts extends Command
                 return;
             }
 
-            // Calculate time remaining until time_cloture
-            $timeClotureStr = $task->time_cloture;
-            $timeClotureData = json_decode($timeClotureStr, true);
-            $timeCloture = null;
-            
-            if (is_array($timeClotureData)) {
-                $firstValue = reset($timeClotureData);
-                if (is_string($firstValue)) {
-                    try {
-                        $timeCloture = Carbon::parse($firstValue);
-                    } catch (\Exception $e) {
-                        // Use current time as fallback
-                        $timeCloture = Carbon::now();
-                    }
-                }
-            } else {
-                try {
-                    $timeCloture = Carbon::parse($timeClotureStr);
-                } catch (\Exception $e) {
-                    $timeCloture = Carbon::now();
-                }
-            }
-
-            $timeRemaining = $timeCloture ? Carbon::now()->diffForHumans($timeCloture, true) : 'unknown';
+            // Calculate time remaining until time_cloture using the new time format
+            $endDateTime = $task->calculateEndDateTime();
+            $timeRemaining = $endDateTime ? Carbon::now()->diffForHumans($endDateTime, true) : 'unknown';
 
             // Create notification
             $title = "Task Timeout Alert: {$task->name}";
@@ -403,29 +382,9 @@ class CheckTaskTimeouts extends Command
                 return;
             }
 
-            // Calculate time remaining until time_cloture
-            $timeClotureStr = $task->time_cloture;
-            $timeClotureData = json_decode($timeClotureStr, true);
-            $timeCloture = null;
-            
-            if (is_array($timeClotureData)) {
-                $firstValue = reset($timeClotureData);
-                if (is_string($firstValue)) {
-                    try {
-                        $timeCloture = Carbon::parse($firstValue);
-                    } catch (\Exception $e) {
-                        $timeCloture = Carbon::now();
-                    }
-                }
-            } else {
-                try {
-                    $timeCloture = Carbon::parse($timeClotureStr);
-                } catch (\Exception $e) {
-                    $timeCloture = Carbon::now();
-                }
-            }
-
-            $timeRemaining = $timeCloture ? Carbon::now()->diffForHumans($timeCloture, true) : 'unknown';
+            // Calculate time remaining until time_cloture using the new time format
+            $endDateTime = $task->calculateEndDateTime();
+            $timeRemaining = $endDateTime ? Carbon::now()->diffForHumans($endDateTime, true) : 'unknown';
 
             // Create notification
             $title = "Task Timeout Alert: {$task->name}";

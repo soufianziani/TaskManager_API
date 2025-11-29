@@ -34,8 +34,9 @@ class CreateTaskRequest extends FormRequest
             'period_type' => ['nullable', 'string', 'max:255'],
             'period_start' => ['nullable', 'date_format:Y-m-d H:i:s'],
             'period_end' => ['nullable', 'date_format:Y-m-d H:i:s', 'after_or_equal:period_start'],
-            'time_cloture' => ['nullable', 'string'], // mediumtext - can be JSON or single datetime string
-            'time_out' => ['nullable', 'string'], // mediumtext - can be JSON or single string
+            'time_cloture' => ['nullable', 'date_format:H:i:s'], // Time format: HH:mm:ss
+            'time_out' => ['nullable', 'date_format:H:i:s'], // Time format: HH:mm:ss
+            'days_between' => ['nullable', 'integer', 'min:0'], // Number of days between start and end times
             'period_days' => ['nullable', 'string'],
             'period_urgent' => ['nullable', 'string'],
             'type_justif' => ['nullable', 'string'],
@@ -56,68 +57,58 @@ class CreateTaskRequest extends FormRequest
     public function withValidator($validator)
     {
         $validator->after(function ($validator) {
-            $periodStart = $this->input('period_start');
-            $periodEnd = $this->input('period_end');
             $timeCloture = $this->input('time_cloture');
+            $timeOut = $this->input('time_out');
+            $daysBetween = $this->input('days_between', 0);
 
-            // Validate time_cloture constraints
-            // time_cloture can be a JSON string (for different times per day) or a single datetime string
-            if ($timeCloture) {
+            // Validate that if time_cloture is set, time_out should also be set
+            if ($timeCloture && !$timeOut) {
+                $validator->errors()->add(
+                    'time_out',
+                    'Time out (task start time) is required when time cloture (task end time) is set.'
+                );
+            }
+
+            // Validate that if time_out is set, time_cloture should also be set
+            if ($timeOut && !$timeCloture) {
+                $validator->errors()->add(
+                    'time_cloture',
+                    'Time cloture (task end time) is required when time out (task start time) is set.'
+                );
+            }
+
+            // Validate time format if both are set
+            if ($timeCloture && $timeOut) {
                 try {
-                    // Try to parse as JSON first
-                    $timeClotureData = json_decode($timeCloture, true);
+                    // Parse time strings (format: HH:mm:ss)
+                    $timeClotureParts = explode(':', $timeCloture);
+                    $timeOutParts = explode(':', $timeOut);
                     
-                    if (json_last_error() === JSON_ERROR_NONE && is_array($timeClotureData)) {
-                        // It's JSON - validate each datetime value
-                        foreach ($timeClotureData as $day => $datetimeStr) {
-                            if (is_string($datetimeStr)) {
-                                $timeClotureDate = \Carbon\Carbon::parse($datetimeStr);
-                                
-                                // Check: period_start < time_cloture
-                                if ($periodStart) {
-                                    $periodStartDate = \Carbon\Carbon::parse($periodStart);
-                                    if ($timeClotureDate->lte($periodStartDate)) {
-                                        $validator->errors()->add(
-                                            'time_cloture',
-                                            "Time cloture for {$day} must be after period start."
-                                        );
-                                    }
-                                }
-                                
-                                // Check: time_cloture <= period_end
-                                if ($periodEnd) {
-                                    $periodEndDate = \Carbon\Carbon::parse($periodEnd);
-                                    if ($timeClotureDate->gt($periodEndDate)) {
-                                        $validator->errors()->add(
-                                            'time_cloture',
-                                            "Time cloture for {$day} must be less than or equal to period end."
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                    if (count($timeClotureParts) < 2 || count($timeOutParts) < 2) {
+                        $validator->errors()->add(
+                            'time_cloture',
+                            'Invalid time format. Must be in HH:mm:ss format.'
+                        );
                     } else {
-                        // It's a single datetime string
-                        $timeClotureDate = \Carbon\Carbon::parse($timeCloture);
+                        $timeClotureHour = (int)$timeClotureParts[0];
+                        $timeOutHour = (int)$timeOutParts[0];
                         
-                        // Check: period_start < time_cloture
-                        if ($periodStart) {
-                            $periodStartDate = \Carbon\Carbon::parse($periodStart);
-                            if ($timeClotureDate->lte($periodStartDate)) {
+                        // If days_between is 0, end time should be after start time on the same day
+                        if ($daysBetween == 0 && $timeClotureHour <= $timeOutHour) {
+                            // Check minutes if hours are equal
+                            if ($timeClotureHour == $timeOutHour) {
+                                $timeClotureMin = (int)$timeClotureParts[1];
+                                $timeOutMin = (int)$timeOutParts[1];
+                                if ($timeClotureMin <= $timeOutMin) {
+                                    $validator->errors()->add(
+                                        'time_cloture',
+                                        'Task end time must be after task start time when days between is 0.'
+                                    );
+                                }
+                            } else {
                                 $validator->errors()->add(
                                     'time_cloture',
-                                    'Time cloture must be after period start.'
-                                );
-                            }
-                        }
-                        
-                        // Check: time_cloture <= period_end
-                        if ($periodEnd) {
-                            $periodEndDate = \Carbon\Carbon::parse($periodEnd);
-                            if ($timeClotureDate->gt($periodEndDate)) {
-                                $validator->errors()->add(
-                                    'time_cloture',
-                                    'Time cloture must be less than or equal to period end.'
+                                    'Task end time must be after task start time when days between is 0.'
                                 );
                             }
                         }
@@ -125,7 +116,7 @@ class CreateTaskRequest extends FormRequest
                 } catch (\Exception $e) {
                     $validator->errors()->add(
                         'time_cloture',
-                        'Invalid time cloture format. Must be a valid datetime string or JSON object.'
+                        'Invalid time format. Must be in HH:mm:ss format.'
                     );
                 }
             }
