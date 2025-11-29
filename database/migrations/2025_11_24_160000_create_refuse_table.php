@@ -11,17 +11,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('refuse', function (Blueprint $table) {
-            $table->id();
-            $table->text('description');
-            $table->string('task', 255); // Task ID
-            $table->integer('created_by'); // User ID who created the refusal
-            $table->timestamps();
-            
-            // Add indexes
-            $table->index('task');
-            $table->index('created_by');
-        });
+        if (!Schema::hasTable('refuse')) {
+            Schema::create('refuse', function (Blueprint $table) {
+                $table->id();
+                $table->text('description');
+                $table->string('task', 255); // Task ID
+                $table->integer('created_by'); // User ID who created the refusal
+                $table->timestamps();
+                
+                // Add indexes
+                $table->index('task');
+                $table->index('created_by');
+            });
+        }
     }
 
     /**

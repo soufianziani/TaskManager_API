@@ -47,8 +47,6 @@ class Task extends Model
     protected $casts = [
         'period_start' => 'datetime',
         'period_end' => 'datetime',
-        'time_cloture' => 'datetime', // Cast as datetime for easier manipulation
-        'time_out' => 'datetime', // Cast as datetime for easier manipulation
         'timeout_notified_at' => 'datetime',
         'status' => 'boolean',
         'redirect' => 'boolean',

@@ -11,6 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // First, clean up existing invalid data
+        \DB::table('tasks')->whereNotNull('time_cloture')->update([
+            'time_cloture' => null
+        ]);
+        \DB::table('tasks')->whereNotNull('time_out')->update([
+            'time_out' => null
+        ]);
+        
         Schema::table('tasks', function (Blueprint $table) {
             // Change time_cloture from mediumtext to time
             $table->time('time_cloture')->nullable()->change();
