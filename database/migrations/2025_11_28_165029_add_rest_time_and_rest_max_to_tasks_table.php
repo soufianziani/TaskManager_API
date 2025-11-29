@@ -12,8 +12,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('tasks', function (Blueprint $table) {
-            $table->time('rest_time')->nullable()->after('time_out');
-            $table->integer('rest_max')->default(0)->after('rest_time');
+            if (!Schema::hasColumn('tasks', 'rest_time')) {
+                $table->time('rest_time')->nullable()->after('time_out');
+            }
+            if (!Schema::hasColumn('tasks', 'rest_max')) {
+                $table->integer('rest_max')->default(0)->after('rest_time');
+            }
         });
     }
 
