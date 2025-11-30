@@ -12,9 +12,9 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // Check for task timeouts every 30 seconds for real-time checking
+        // Check for task timeouts every minute
         $schedule->command('tasks:check-timeouts')
-            ->everyThirtySeconds()
+            ->everyMinute()
             ->withoutOverlapping()
             ->runInBackground();
     }
