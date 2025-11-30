@@ -1478,12 +1478,35 @@ class TaskController extends Controller
         $newRestMax = $restMax - 1;
         $isLastTime = ($newRestMax == 1);
 
+        // Calculate next alarm time based on rest_time
+        $nextAlarmAt = null;
+        if ($restTime) {
+            $restTimeStr = $restTime;
+            if (is_object($restTimeStr) && method_exists($restTimeStr, 'format')) {
+                $restTimeStr = $restTimeStr->format('H:i:s');
+            }
+            
+            // Parse rest_time (HH:mm:ss format)
+            $restTimeParts = explode(':', $restTimeStr);
+            if (count($restTimeParts) >= 2) {
+                $hours = (int)$restTimeParts[0];
+                $minutes = (int)$restTimeParts[1];
+                $seconds = isset($restTimeParts[2]) ? (int)$restTimeParts[2] : 0;
+                
+                // Set next alarm time from now
+                $nextAlarmAt = Carbon::now()->addHours($hours)->addMinutes($minutes)->addSeconds($seconds);
+            }
+        }
+
         if ($existingDelay) {
             // Update existing delay
             if ($restTime) {
                 $existingDelay->rest_time = Carbon::parse($restTime);
             }
             $existingDelay->rest_max = $newRestMax;
+            $existingDelay->next_alarm_at = $nextAlarmAt;
+            $existingDelay->alarm_count = 0; // Reset alarm count when new delay is requested
+            $existingDelay->last_alarm_at = null;
             $existingDelay->save();
         } else {
             // Create new delay
@@ -1492,6 +1515,9 @@ class TaskController extends Controller
                 'task_id' => (string)$task->id,
                 'rest_time' => $restTime ? Carbon::parse($restTime) : null,
                 'rest_max' => $newRestMax,
+                'next_alarm_at' => $nextAlarmAt,
+                'alarm_count' => 0,
+                'last_alarm_at' => null,
             ]);
         }
 

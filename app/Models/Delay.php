@@ -15,10 +15,15 @@ class Delay extends Model
         'task_id',
         'rest_time',
         'rest_max',
+        'next_alarm_at',
+        'alarm_count',
+        'last_alarm_at',
     ];
 
     protected $casts = [
         'rest_time' => 'datetime', // Will be stored as time in DB but cast as datetime for Carbon
+        'next_alarm_at' => 'datetime',
+        'last_alarm_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

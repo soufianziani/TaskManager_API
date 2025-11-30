@@ -36,104 +36,166 @@ class CheckTaskTimeouts extends Command
      */
     public function handle()
     {
-        $this->info('Checking for task timeouts...');
+        $this->info('Checking for task start times and delay alarms...');
 
         $now = Carbon::now();
         $notifiedCount = 0;
         $skippedCount = 0;
-        $delayExpiredCount = 0;
+        $delayAlarmCount = 0;
 
-        // Note: With new delay structure (rest_time, rest_max), delays no longer have delay_until
-        // The delay logic will be handled differently - rest_max tracks remaining delays
+        // First, check for active delays that need repeat alarms
+        $this->info('Checking for delay repeat alarms...');
+        $activeDelays = Delay::where('rest_max', '>', 0)
+            ->whereNotNull('next_alarm_at')
+            ->where('next_alarm_at', '<=', $now)
+            ->get();
 
-        // Get all tasks with time_cloture and time_out set
-        // Include tasks where timeout_notified_at is null OR where there are no active delays
-        $tasks = Task::whereNotNull('time_cloture')
-            ->whereNotNull('time_out')
+        foreach ($activeDelays as $delay) {
+            try {
+                $task = Task::find($delay->task_id);
+                if (!$task) {
+                    continue;
+                }
+
+                $user = User::find($delay->user_id);
+                if (!$user || !$user->fcm_token) {
+                    continue;
+                }
+
+                // Check if rest_max is 1 (last time)
+                $isLastTime = ($delay->rest_max == 1);
+
+                $this->info("Sending repeat alarm for delay #{$delay->id} (Task: {$task->name}, User: {$user->user_name})");
+
+                // Send repeat alarm notification
+                $this->sendDelayRepeatAlarm($task, $user, $delay, $isLastTime);
+
+                // Update alarm tracking
+                $delay->alarm_count++;
+                $delay->last_alarm_at = $now;
+
+                // Calculate next alarm time based on rest_time
+                if ($delay->rest_time) {
+                    $restTimeStr = $delay->rest_time;
+                    if (is_object($restTimeStr)) {
+                        // If it's a Carbon instance, get time string
+                        if (method_exists($restTimeStr, 'format')) {
+                            $restTimeStr = $restTimeStr->format('H:i:s');
+                        } else {
+                            // If it's already a time string from database
+                            $restTimeStr = (string)$restTimeStr;
+                        }
+                    }
+
+                    // Parse rest_time (HH:mm:ss format)
+                    $restTimeParts = explode(':', $restTimeStr);
+                    if (count($restTimeParts) >= 2) {
+                        $hours = (int)$restTimeParts[0];
+                        $minutes = (int)$restTimeParts[1];
+                        $seconds = isset($restTimeParts[2]) ? (int)$restTimeParts[2] : 0;
+
+                        // Set next alarm time from now
+                        $delay->next_alarm_at = $now->copy()->addHours($hours)->addMinutes($minutes)->addSeconds($seconds);
+                    }
+                }
+
+                $delay->save();
+                $delayAlarmCount++;
+
+            } catch (\Exception $e) {
+                $this->error("Error processing delay #{$delay->id}: " . $e->getMessage());
+                Log::error('Error processing delay repeat alarm', [
+                    'delay_id' => $delay->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Now check for tasks that have reached their start time (time_out)
+        $this->info('Checking for task start times...');
+
+        // Get all tasks with time_out set (start time)
+        $tasks = Task::whereNotNull('time_out')
             ->where('status', true) // Only active tasks
             ->get()
             ->filter(function ($task) use ($now) {
-                // Skip if already notified and no active delays exist
+                // Only process if not already notified OR if there are no active delays
                 if ($task->timeout_notified_at) {
                     // Check if there are any active delays for this task (rest_max > 0)
                     $activeDelays = Delay::where('task_id', (string)$task->id)
                         ->where('rest_max', '>', 0)
                         ->exists();
                     
-                    // If there are active delays, don't process this task yet
+                    // If there are active delays, don't send initial notification again
                     return !$activeDelays;
                 }
                 return true;
             });
 
         if ($tasks->isEmpty()) {
-            $this->info('No tasks found to check.');
-            if ($delayExpiredCount > 0) {
-                $this->info("  - Delays expired and notifications sent: {$delayExpiredCount}");
-            }
-            return 0;
-        }
+            $this->info('No tasks found to check for start time.');
+        } else {
+            $this->info("Found {$tasks->count()} tasks to check for start time.");
 
-        $this->info("Found {$tasks->count()} tasks to check.");
+            foreach ($tasks as $task) {
+                try {
+                    // Check if there are active delays for this task (rest_max > 0)
+                    $activeDelays = Delay::where('task_id', (string)$task->id)
+                        ->where('rest_max', '>', 0)
+                        ->exists();
 
-        foreach ($tasks as $task) {
-            try {
-                // Check if there are active delays for this task (rest_max > 0)
-                $activeDelays = Delay::where('task_id', (string)$task->id)
-                    ->where('rest_max', '>', 0)
-                    ->exists();
-
-                if ($activeDelays) {
-                    $this->line("Task #{$task->id} ({$task->name}): Active delay exists. Skipping.");
-                    $skippedCount++;
-                    continue;
-                }
-
-                $timeoutDateTime = $task->calculateTimeoutDateTime();
-
-                if (!$timeoutDateTime) {
-                    $this->warn("Task #{$task->id} ({$task->name}): Could not calculate timeout datetime.");
-                    $skippedCount++;
-                    continue;
-                }
-
-                // Check if timeout has been reached
-                if ($now->gte($timeoutDateTime)) {
-                    // Only send if not already notified
-                    if (!$task->timeout_notified_at) {
-                        $this->info("Task #{$task->id} ({$task->name}): Timeout reached. Sending notification...");
-
-                        // Send notification to all assigned users and create notification_timeout records
-                        $this->sendTimeoutNotification($task);
-
-                        // Mark as notified
-                        $task->timeout_notified_at = $now;
-                        $task->save();
-
-                        $notifiedCount++;
-                        $this->info("  ✓ Notification sent and task marked as notified.");
+                    if ($activeDelays) {
+                        $this->line("Task #{$task->id} ({$task->name}): Active delay exists. Skipping initial notification.");
+                        $skippedCount++;
+                        continue;
                     }
-                } else {
-                    $timeRemaining = $now->diffForHumans($timeoutDateTime, true);
-                    $this->line("Task #{$task->id} ({$task->name}): Timeout not reached yet. Time remaining: {$timeRemaining}");
+
+                    // Calculate start datetime from time_out
+                    $startDateTime = $task->calculateTimeoutDateTime();
+
+                    if (!$startDateTime) {
+                        $this->warn("Task #{$task->id} ({$task->name}): Could not calculate start datetime.");
+                        $skippedCount++;
+                        continue;
+                    }
+
+                    // Check if start time has been reached (within current minute)
+                    if ($now->gte($startDateTime) && $now->diffInMinutes($startDateTime) < 1) {
+                        // Only send if not already notified
+                        if (!$task->timeout_notified_at) {
+                            $this->info("Task #{$task->id} ({$task->name}): Start time reached. Sending notification...");
+
+                            // Send notification to all assigned users
+                            $this->sendStartTimeNotification($task);
+
+                            // Mark as notified
+                            $task->timeout_notified_at = $now;
+                            $task->save();
+
+                            $notifiedCount++;
+                            $this->info("  ✓ Notification sent and task marked as notified.");
+                        }
+                    } else {
+                        $timeRemaining = $now->diffForHumans($startDateTime, true);
+                        $this->line("Task #{$task->id} ({$task->name}): Start time not reached yet. Time remaining: {$timeRemaining}");
+                    }
+                } catch (\Exception $e) {
+                    $this->error("Error processing task #{$task->id}: " . $e->getMessage());
+                    Log::error('Error checking task start time', [
+                        'task_id' => $task->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    $skippedCount++;
                 }
-            } catch (\Exception $e) {
-                $this->error("Error processing task #{$task->id}: " . $e->getMessage());
-                Log::error('Error checking task timeout', [
-                    'task_id' => $task->id,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                $skippedCount++;
             }
         }
 
         $this->newLine();
         $this->info("Summary:");
-        $this->info("  - New notifications sent: {$notifiedCount}");
-        $this->info("  - Delays expired and notifications sent: {$delayExpiredCount}");
+        $this->info("  - New start time notifications sent: {$notifiedCount}");
+        $this->info("  - Delay repeat alarms sent: {$delayAlarmCount}");
         $this->info("  - Skipped/Errors: {$skippedCount}");
-        $this->info("  - Total checked: {$tasks->count()}");
 
         return 0;
     }
@@ -199,9 +261,9 @@ class CheckTaskTimeouts extends Command
     }
 
     /**
-     * Send timeout notification to assigned users
+     * Send start time notification to assigned users
      */
-    private function sendTimeoutNotification(Task $task): void
+    private function sendStartTimeNotification(Task $task): void
     {
         try {
             // Parse users field (JSON string like "[2]" or "[2,3]" or "[\"2\"]")
@@ -261,9 +323,9 @@ class CheckTaskTimeouts extends Command
             $endDateTime = $task->calculateEndDateTime();
             $timeRemaining = $endDateTime ? Carbon::now()->diffForHumans($endDateTime, true) : 'unknown';
 
-            // Create notification
-            $title = "Task Timeout Alert: {$task->name}";
-            $body = "The timeout for task '{$task->name}' has been reached. Time remaining until closure: {$timeRemaining}.";
+            // Create notification for task start time
+            $title = "Task Start Time: {$task->name}";
+            $body = "The start time for task '{$task->name}' has been reached. Time remaining until closure: {$timeRemaining}.";
             
             $notification = Notification::create($title, $body);
 
@@ -312,8 +374,9 @@ class CheckTaskTimeouts extends Command
                             'task_name' => $task->name,
                             'task_step' => $task->step,
                             'user_name' => $user->user_name,
-                            'notification_type' => 'timeout',
+                            'notification_type' => 'start_time',
                             'is_last_time' => $isLastTime,
+                            'rest_max' => $delay->rest_max,
                         ]);
 
                     $messaging->send($message);
@@ -349,6 +412,74 @@ class CheckTaskTimeouts extends Command
                 'task_id' => $task->id ?? null,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
+            ]);
+        }
+    }
+
+    /**
+     * Send repeat alarm notification for delay
+     */
+    private function sendDelayRepeatAlarm(Task $task, User $user, Delay $delay, bool $isLastTime): void
+    {
+        try {
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
+                Log::warning('Firebase messaging not available, cannot send delay repeat alarm', [
+                    'task_id' => $task->id,
+                    'user_id' => $user->id
+                ]);
+                return;
+            }
+
+            // Calculate time remaining until time_cloture
+            $endDateTime = $task->calculateEndDateTime();
+            $timeRemaining = $endDateTime ? Carbon::now()->diffForHumans($endDateTime, true) : 'unknown';
+
+            // Create notification
+            $title = "Task Reminder: {$task->name}";
+            $body = "Reminder: Task '{$task->name}' is still active. Time remaining until closure: {$timeRemaining}.";
+            
+            if ($isLastTime) {
+                $title = "⚠️ LAST TIME - Task Reminder: {$task->name}";
+                $body = "⚠️ LAST TIME: This is your final reminder for task '{$task->name}'. Time remaining until closure: {$timeRemaining}.";
+            }
+
+            $notification = Notification::create($title, $body);
+
+            $message = CloudMessage::withTarget('token', $user->fcm_token)
+                ->withNotification($notification)
+                ->withData([
+                    'title' => $title,
+                    'body' => $body,
+                    'task_id' => $task->id,
+                    'task_name' => $task->name,
+                    'task_step' => $task->step,
+                    'user_name' => $user->user_name,
+                    'notification_type' => 'delay_repeat_alarm',
+                    'is_last_time' => $isLastTime,
+                    'rest_max' => $delay->rest_max,
+                    'alarm_count' => $delay->alarm_count + 1,
+                ]);
+
+            $messaging->send($message);
+
+            Log::info('Delay repeat alarm sent to user', [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'task_id' => $task->id,
+                'delay_id' => $delay->id,
+                'rest_max' => $delay->rest_max,
+                'alarm_count' => $delay->alarm_count + 1,
+                'is_last_time' => $isLastTime,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send delay repeat alarm', [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'task_id' => $task->id,
+                'delay_id' => $delay->id,
+                'error' => $e->getMessage(),
             ]);
         }
     }
