@@ -16,3 +16,5 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::post('/tasks/check-timeouts', [App\Http\Controllers\Admin\TaskTimeoutController::class, 'check']);

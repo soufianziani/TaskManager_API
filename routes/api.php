@@ -91,7 +91,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(funct
     Route::get('/tasks/{id}/refuse-history', [App\Http\Controllers\Admin\TaskController::class, 'getRefuseHistory']);
     Route::post('/tasks/{id}/request-delay', [App\Http\Controllers\Admin\TaskController::class, 'requestDelay']);
     // Manually trigger check of task timeouts and timeout notifications
-    Route::post('/tasks/check-timeouts', [App\Http\Controllers\Admin\TaskTimeoutController::class, 'check']);
+    
 });
 
 // Public (unauthenticated) route to manually trigger task timeout check (for testing)
