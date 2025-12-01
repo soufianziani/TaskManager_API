@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\TaskNotification;
+use App\Models\NotificationTimeout;
+use App\Models\Task;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -312,6 +315,128 @@ class NotificationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while sending notifications: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * List all notifications for the authenticated user (for Notification page).
+     * Includes:
+     * - Task notifications (assigned, status updated)
+     * - Timeout notifications from notification_timeouts
+     */
+    public function listUserNotifications(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $userId = $user->id;
+
+        // Task notifications (from TaskNotification table)
+        $taskNotifications = TaskNotification::with('task')
+            ->where('user_id', $userId)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function (TaskNotification $n) {
+                return [
+                    'id' => $n->id,
+                    'source' => 'task',
+                    'type' => $n->type,
+                    'title' => $n->title,
+                    'body' => $n->body,
+                    'task_id' => $n->task_id,
+                    'task_name' => $n->task->name ?? null,
+                    'created_at' => $n->created_at,
+                ];
+            });
+
+        // Timeout notifications (from notification_timeouts) - only unread (read = 0)
+        $timeoutNotifications = NotificationTimeout::with('task')
+            ->where('users_id', (string)$userId)
+            ->where('read', 0)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function (NotificationTimeout $n) {
+                return [
+                    'id' => $n->id,
+                    'source' => 'timeout',
+                    'type' => 'timeout',
+                    'title' => 'Task Timeout',
+                    'body' => $n->description,
+                    'task_id' => $n->task_id,
+                    'task_name' => $n->task->name ?? null,
+                    'created_at' => $n->created_at,
+                    'next' => $n->next,
+                    'read' => $n->read,
+                ];
+            });
+
+        // Merge and sort by created_at descending
+        $all = $taskNotifications
+            ->merge($timeoutNotifications)
+            ->sortByDesc('created_at')
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Notifications retrieved successfully',
+            'data' => $all,
+        ], 200);
+    }
+
+    /**
+     * Mark a notification_timeout as read (set read = 1)
+     */
+    public function markTimeoutNotificationAsRead(Request $request, $id): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        try {
+            $notificationTimeout = NotificationTimeout::where('id', $id)
+                ->where('users_id', (string)$user->id)
+                ->first();
+
+            if (!$notificationTimeout) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Notification not found or you do not have permission to mark it as read.',
+                ], 404);
+            }
+
+            $notificationTimeout->read = 1;
+            $notificationTimeout->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification marked as read successfully',
+                'data' => [
+                    'id' => $notificationTimeout->id,
+                    'read' => $notificationTimeout->read,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error marking notification as read', [
+                'notification_id' => $id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while marking notification as read: ' . $e->getMessage(),
             ], 500);
         }
     }

@@ -476,6 +476,7 @@ class CheckTaskTimeouts extends Command
                         'next' => $nextNotificationAt,
                         'rest_max' => (int)$restMax,
                         'repeat_count' => 0,
+                        'read' => 0,
                     ]);
 
                     // Create or update delay record with rest_time and rest_max from task
@@ -808,6 +809,7 @@ class CheckTaskTimeouts extends Command
                             'next' => $nextNotificationAt,
                             'rest_max' => $restMax,
                             'repeat_count' => $newRepeatCount,
+                            'read' => 0,
                         ]);
                     }
                 }

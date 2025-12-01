@@ -8,6 +8,7 @@ use App\Models\Task;
 use App\Models\Refuse;
 use App\Models\User;
 use App\Models\Delay;
+use App\Models\TaskNotification;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1367,6 +1368,17 @@ class TaskController extends Controller
 
                     $messaging->send($message);
                     $successCount++;
+
+                    // Store notification for listing in Notification page
+                    TaskNotification::create([
+                        'user_id' => $user->id,
+                        'task_id' => $task->id,
+                        'title' => $title,
+                        'body' => $body,
+                        'type' => $title === 'New Task Assigned'
+                            ? 'task_assigned'
+                            : 'task_status_updated',
+                    ]);
 
                     Log::info('Notification sent to user', [
                         'user_id' => $user->id,

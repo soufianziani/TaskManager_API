@@ -103,4 +103,6 @@ Route::prefix('notifications')->middleware(['auth:sanctum', 'user.active'])->gro
     Route::get('/test-config', [App\Http\Controllers\NotificationController::class, 'testConfiguration']);
     Route::post('/send', [App\Http\Controllers\NotificationController::class, 'sendNotification']);
     Route::post('/send-bulk', [App\Http\Controllers\NotificationController::class, 'sendBulkNotification']);
+    Route::get('/user', [App\Http\Controllers\NotificationController::class, 'listUserNotifications']);
+    Route::put('/timeout/{id}/read', [App\Http\Controllers\NotificationController::class, 'markTimeoutNotificationAsRead']);
 });

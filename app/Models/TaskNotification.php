@@ -4,30 +4,26 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class NotificationTimeout extends Model
+class TaskNotification extends Model
 {
     use HasFactory;
 
     protected $fillable = [
+        'user_id',
         'task_id',
-        'users_id',
-        'description',
-        'next',
-        'rest_max',
-        'repeat_count',
-        'read',
+        'title',
+        'body',
+        'type',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
-        'next' => 'datetime',
     ];
 
     /**
-     * Get the task associated with the notification
+     * Task related to this notification.
      */
     public function task()
     {
@@ -35,10 +31,12 @@ class NotificationTimeout extends Model
     }
 
     /**
-     * Get the user associated with the notification
+     * User who receives this notification.
      */
     public function user()
     {
-        return $this->belongsTo(User::class, 'users_id', 'id');
+        return $this->belongsTo(User::class, 'user_id', 'id');
     }
 }
+
+
