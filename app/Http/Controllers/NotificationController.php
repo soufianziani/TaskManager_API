@@ -338,6 +338,9 @@ class NotificationController extends Controller
 
         $userId = $user->id;
 
+        // Whether to show read timeout notifications (read = 1) instead of unread (read = 0)
+        $showReadTimeouts = $request->query('show_read', '0') === '1';
+
         // Task notifications (from TaskNotification table)
         $taskNotifications = TaskNotification::with('task')
             ->where('user_id', $userId)
@@ -356,11 +359,14 @@ class NotificationController extends Controller
                 ];
             });
 
-        // Timeout notifications (from notification_timeouts) - only unread (read = 0)
-        $timeoutNotifications = NotificationTimeout::with('task')
+        // Timeout notifications (from notification_timeouts)
+        // If show_read=1, return read=1 (history); otherwise return unread (read=0)
+        $timeoutQuery = NotificationTimeout::with('task')
             ->where('users_id', (string)$userId)
-            ->where('read', 0)
-            ->orderBy('created_at', 'desc')
+            ->where('read', $showReadTimeouts ? 1 : 0)
+            ->orderBy('created_at', 'desc');
+
+        $timeoutNotifications = $timeoutQuery
             ->get()
             ->map(function (NotificationTimeout $n) {
                 return [
@@ -437,6 +443,57 @@ class NotificationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while marking notification as read: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Mark a notification_timeout as deleted (set read = 2)
+     */
+    public function deleteTimeoutNotification(Request $request, $id): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        try {
+            $notificationTimeout = NotificationTimeout::where('id', $id)
+                ->where('users_id', (string)$user->id)
+                ->first();
+
+            if (!$notificationTimeout) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Notification not found or you do not have permission to delete it.',
+                ], 404);
+            }
+
+            $notificationTimeout->read = 2;
+            $notificationTimeout->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification deleted successfully',
+                'data' => [
+                    'id' => $notificationTimeout->id,
+                    'read' => $notificationTimeout->read,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error deleting notification_timeout', [
+                'notification_id' => $id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while deleting notification: ' . $e->getMessage(),
             ], 500);
         }
     }
