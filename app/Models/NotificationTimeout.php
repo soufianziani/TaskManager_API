@@ -15,6 +15,8 @@ class NotificationTimeout extends Model
         'users_id',
         'description',
         'next',
+        'rest_max',
+        'repeat_count',
     ];
 
     protected $casts = [

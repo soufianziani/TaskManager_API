@@ -42,6 +42,7 @@ class CheckTaskTimeouts extends Command
         $notifiedCount = 0;
         $skippedCount = 0;
         $delayAlarmCount = 0;
+        $repeatTimeoutCount = 0;
 
         // First, check for active delays that need repeat alarms
         $this->info('Checking for delay repeat alarms...');
@@ -110,6 +111,10 @@ class CheckTaskTimeouts extends Command
                 ]);
             }
         }
+
+        // Then process notification_timeout repeats based on `next` field
+        $this->info('Checking for notification timeout repeats...');
+        $this->processNotificationTimeoutRepeats($now, $repeatTimeoutCount, $skippedCount);
 
         // Now check for tasks that have reached their start time (time_out)
         $this->info('Checking for task start times...');
@@ -195,6 +200,7 @@ class CheckTaskTimeouts extends Command
         $this->info("Summary:");
         $this->info("  - New start time notifications sent: {$notifiedCount}");
         $this->info("  - Delay repeat alarms sent: {$delayAlarmCount}");
+        $this->info("  - Timeout repeat notifications sent: {$repeatTimeoutCount}");
         $this->info("  - Skipped/Errors: {$skippedCount}");
 
         return 0;
@@ -257,6 +263,80 @@ class CheckTaskTimeouts extends Command
         } catch (\Exception $e) {
             Log::error('Firebase initialization error in CheckTaskTimeouts: ' . $e->getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Send repeat timeout notification based on notification_timeout record
+     */
+    private function sendRepeatTimeoutNotification(NotificationTimeout $notificationTimeout, Task $task, User $user): void
+    {
+        try {
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
+                Log::warning('Firebase messaging not available, cannot send repeat timeout notification', [
+                    'task_id' => $task->id,
+                    'user_id' => $user->id,
+                    'notification_timeout_id' => $notificationTimeout->id,
+                ]);
+                return;
+            }
+
+            // Calculate time remaining until time_cloture
+            $endDateTime = $task->calculateEndDateTime();
+            $timeRemaining = $endDateTime ? Carbon::now()->diffForHumans($endDateTime, true) : 'unknown';
+
+            // Determine if this is the last allowed repeat
+            $restMax = (int)($notificationTimeout->rest_max ?? 0);
+            $repeatCount = (int)($notificationTimeout->repeat_count ?? 0);
+            $isLastTime = $restMax > 0 && ($repeatCount + 1) >= $restMax;
+
+            // Create notification title/body
+            $baseTitle = "Task Timeout Reminder: {$task->name}";
+            $baseBody = "Reminder: The timeout for task '{$task->name}' is active. Time remaining until closure: {$timeRemaining}.";
+
+            if ($isLastTime) {
+                $title = "⚠️ LAST TIME - {$baseTitle}";
+                $body = "{$baseBody} This is your last timeout reminder.";
+            } else {
+                $title = $baseTitle;
+                $body = $baseBody;
+            }
+
+            $notification = Notification::create($title, $body);
+
+            $message = CloudMessage::withTarget('token', $user->fcm_token)
+                ->withNotification($notification)
+                ->withData([
+                    'title' => $title,
+                    'body' => $body,
+                    'task_id' => $task->id,
+                    'task_name' => $task->name,
+                    'task_step' => $task->step,
+                    'user_name' => $user->user_name,
+                    'notification_type' => 'timeout_repeat',
+                    'notification_timeout_id' => $notificationTimeout->id,
+                    'is_last_time' => $isLastTime,
+                    'rest_max' => $restMax,
+                    'repeat_count' => $repeatCount + 1,
+                ]);
+
+            $messaging->send($message);
+
+            Log::info('Repeat timeout notification sent to user', [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'task_id' => $task->id,
+                'notification_timeout_id' => $notificationTimeout->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send repeat timeout notification', [
+                'user_id' => $user->id ?? null,
+                'task_id' => $task->id ?? null,
+                'notification_timeout_id' => $notificationTimeout->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -335,23 +415,26 @@ class CheckTaskTimeouts extends Command
             // Get rest_time and rest_max from task
             $restTime = $task->rest_time;
             $restMax = $task->rest_max ?? 0;
+            $restTimeStr = null;
+
+            if ($restTime) {
+                $restTimeStr = $restTime;
+                if (is_object($restTimeStr)) {
+                    // If it's a Carbon instance, get time string
+                    if (method_exists($restTimeStr, 'format')) {
+                        $restTimeStr = $restTimeStr->format('H:i:s');
+                    } else {
+                        $restTimeStr = (string)$restTimeStr;
+                    }
+                }
+            }
 
             // Send notification to each user and create records
             foreach ($users as $user) {
                 try {
                     // Calculate next notification datetime based on rest_time and rest_max
                     $nextNotificationAt = null;
-                    if ($restTime && $restMax > 0) {
-                        $restTimeStr = $restTime;
-                        if (is_object($restTimeStr)) {
-                            // If it's a Carbon instance, get time string
-                            if (method_exists($restTimeStr, 'format')) {
-                                $restTimeStr = $restTimeStr->format('H:i:s');
-                            } else {
-                                $restTimeStr = (string)$restTimeStr;
-                            }
-                        }
-
+                    if ($restTimeStr && $restMax > 0) {
                         $restTimeParts = explode(':', $restTimeStr);
                         if (count($restTimeParts) >= 2) {
                             $hours = (int)$restTimeParts[0];
@@ -366,12 +449,26 @@ class CheckTaskTimeouts extends Command
                         }
                     }
 
+                    // Build a richer description stored in DB
+                    $dbDescriptionLines = [
+                        "Start timeout notification created.",
+                        "Task: {$task->name} (ID: {$task->id})",
+                        "User: {$user->user_name} (ID: {$user->id})",
+                        "Time remaining until closure: {$timeRemaining}",
+                        "Rest time between timeout notifications: " . ($restTimeStr ?: 'none'),
+                        "Max repeats (rest_max): " . (int)$restMax,
+                        "Next notification at: " . ($nextNotificationAt ? $nextNotificationAt->toDateTimeString() : 'none'),
+                    ];
+                    $dbDescription = implode("\n", $dbDescriptionLines);
+
                     // Create notification_timeout record
                     NotificationTimeout::create([
                         'task_id' => (string)$task->id,
                         'users_id' => (string)$user->id,
-                        'description' => $body,
+                        'description' => $dbDescription,
                         'next' => $nextNotificationAt,
+                        'rest_max' => (int)$restMax,
+                        'repeat_count' => 0,
                     ]);
 
                     // Create or update delay record with rest_time and rest_max from task
@@ -586,6 +683,114 @@ class CheckTaskTimeouts extends Command
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+        }
+    }
+
+    /**
+     * Process notification_timeout records whose next time has passed
+     */
+    private function processNotificationTimeoutRepeats(Carbon $now, int &$repeatTimeoutCount, int &$skippedCount): void
+    {
+        $dueNotifications = NotificationTimeout::whereNotNull('next')
+            ->where('next', '<=', $now)
+            ->get();
+
+        if ($dueNotifications->isEmpty()) {
+            return;
+        }
+
+        foreach ($dueNotifications as $notificationTimeout) {
+            try {
+                $task = Task::find($notificationTimeout->task_id);
+                if (!$task) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                $user = User::where('id', $notificationTimeout->users_id)
+                    ->whereNotNull('fcm_token')
+                    ->where('fcm_token', '!=', '')
+                    ->first();
+
+                if (!$user) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Check rest_max / repeat_count limits
+                $restMax = (int)($notificationTimeout->rest_max ?? 0);
+                $repeatCount = (int)($notificationTimeout->repeat_count ?? 0);
+
+                if ($restMax > 0 && $repeatCount >= $restMax) {
+                    // No more repeats allowed
+                    $notificationTimeout->next = null;
+                    $notificationTimeout->save();
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Send repeat notification
+                $this->sendRepeatTimeoutNotification($notificationTimeout, $task, $user);
+                $repeatTimeoutCount++;
+
+                // Update repeat_count
+                $notificationTimeout->repeat_count = $repeatCount + 1;
+
+                // Calculate next time using task->rest_time if available
+                $nextNotificationAt = null;
+                $restTime = $task->rest_time;
+
+                if ($restTime && ($restMax === 0 || $notificationTimeout->repeat_count < $restMax)) {
+                    $restTimeStr = $restTime;
+                    if (is_object($restTimeStr)) {
+                        if (method_exists($restTimeStr, 'format')) {
+                            $restTimeStr = $restTimeStr->format('H:i:s');
+                        } else {
+                            $restTimeStr = (string)$restTimeStr;
+                        }
+                    }
+
+                    $restTimeParts = explode(':', $restTimeStr);
+                    if (count($restTimeParts) >= 2) {
+                        $hours = (int)$restTimeParts[0];
+                        $minutes = (int)$restTimeParts[1];
+                        $seconds = isset($restTimeParts[2]) ? (int)$restTimeParts[2] : 0;
+
+                        $nextNotificationAt = $now->copy()
+                            ->addHours($hours)
+                            ->addMinutes($minutes)
+                            ->addSeconds($seconds);
+                    }
+                }
+
+                // Update description with more info, including last/remaining status
+                $isLastTime = $restMax > 0 && $notificationTimeout->repeat_count >= $restMax;
+                $remaining = $restMax > 0
+                    ? max($restMax - $notificationTimeout->repeat_count, 0)
+                    : null;
+
+                $descLines = [
+                    "Timeout repeat notification sent.",
+                    "Task: {$task->name} (ID: {$task->id})",
+                    "User: {$user->user_name} (ID: {$user->id})",
+                    "Repeat count: {$notificationTimeout->repeat_count}" . ($restMax > 0 ? " / {$restMax}" : ''),
+                    $isLastTime
+                        ? "This was the last allowed timeout repeat notification."
+                        : ($remaining !== null ? "Remaining allowed repeats: {$remaining}." : "No repeat limit configured (rest_max = 0)."),
+                    "Next notification at: " . ($nextNotificationAt ? $nextNotificationAt->toDateTimeString() : 'none'),
+                    "Processed at: " . Carbon::now()->toDateTimeString(),
+                ];
+                $notificationTimeout->description = implode("\n", $descLines);
+
+                $notificationTimeout->next = $nextNotificationAt;
+                $notificationTimeout->save();
+            } catch (\Exception $e) {
+                $skippedCount++;
+                Log::error('Error processing notification_timeout repeat', [
+                    'notification_timeout_id' => $notificationTimeout->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

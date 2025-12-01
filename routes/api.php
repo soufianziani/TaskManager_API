@@ -94,6 +94,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'user.active'])->group(funct
     Route::post('/tasks/check-timeouts', [App\Http\Controllers\Admin\TaskTimeoutController::class, 'check']);
 });
 
+// Public (unauthenticated) route to manually trigger task timeout check (for testing)
+// WARNING: Do not use this in production without protection.
+Route::post('/admin/tasks/check-timeouts-test', [App\Http\Controllers\Admin\TaskTimeoutController::class, 'check']);
+
 // Notification Routes
 Route::prefix('notifications')->middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::get('/test-config', [App\Http\Controllers\NotificationController::class, 'testConfiguration']);
