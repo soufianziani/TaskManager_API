@@ -339,11 +339,39 @@ class CheckTaskTimeouts extends Command
             // Send notification to each user and create records
             foreach ($users as $user) {
                 try {
+                    // Calculate next notification datetime based on rest_time and rest_max
+                    $nextNotificationAt = null;
+                    if ($restTime && $restMax > 0) {
+                        $restTimeStr = $restTime;
+                        if (is_object($restTimeStr)) {
+                            // If it's a Carbon instance, get time string
+                            if (method_exists($restTimeStr, 'format')) {
+                                $restTimeStr = $restTimeStr->format('H:i:s');
+                            } else {
+                                $restTimeStr = (string)$restTimeStr;
+                            }
+                        }
+
+                        $restTimeParts = explode(':', $restTimeStr);
+                        if (count($restTimeParts) >= 2) {
+                            $hours = (int)$restTimeParts[0];
+                            $minutes = (int)$restTimeParts[1];
+                            $seconds = isset($restTimeParts[2]) ? (int)$restTimeParts[2] : 0;
+
+                            $nextNotificationAt = Carbon::now()
+                                ->copy()
+                                ->addHours($hours)
+                                ->addMinutes($minutes)
+                                ->addSeconds($seconds);
+                        }
+                    }
+
                     // Create notification_timeout record
                     NotificationTimeout::create([
                         'task_id' => (string)$task->id,
                         'users_id' => (string)$user->id,
                         'description' => $body,
+                        'next' => $nextNotificationAt,
                     ]);
 
                     // Create or update delay record with rest_time and rest_max from task

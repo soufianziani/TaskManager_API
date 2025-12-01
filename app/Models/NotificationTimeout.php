@@ -14,11 +14,13 @@ class NotificationTimeout extends Model
         'task_id',
         'users_id',
         'description',
+        'next',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'next' => 'datetime',
     ];
 
     /**
