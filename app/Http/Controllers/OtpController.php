@@ -9,6 +9,7 @@ use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class OtpController extends Controller
 {
@@ -55,10 +56,22 @@ class OtpController extends Controller
                 ], 403);
             }
         }
-        
+
         // For 'phone_update' purpose, verify user is authenticated
         if ($purpose === 'phone_update') {
             $authenticatedUser = $request->user();
+            
+            // If not available from request (route doesn't have auth middleware), manually check token
+            if (!$authenticatedUser) {
+                $bearerToken = $request->bearerToken();
+                if ($bearerToken) {
+                    $token = PersonalAccessToken::findToken($bearerToken);
+                    if ($token) {
+                        $authenticatedUser = $token->tokenable;
+                    }
+                }
+            }
+            
             if (!$authenticatedUser) {
                 return response()->json([
                     'success' => false,
@@ -181,10 +194,22 @@ class OtpController extends Controller
                 ], 403);
             }
         }
-        
+
         // For 'phone_update' purpose, verify user is authenticated
         if ($purpose === 'phone_update') {
             $authenticatedUser = $request->user();
+            
+            // If not available from request (route doesn't have auth middleware), manually check token
+            if (!$authenticatedUser) {
+                $bearerToken = $request->bearerToken();
+                if ($bearerToken) {
+                    $token = PersonalAccessToken::findToken($bearerToken);
+                    if ($token) {
+                        $authenticatedUser = $token->tokenable;
+                    }
+                }
+            }
+            
             if (!$authenticatedUser) {
                 return response()->json([
                     'success' => false,
