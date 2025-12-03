@@ -215,7 +215,7 @@ class AuthController extends Controller
         $request->validate([
             'user_name' => 'required|string',
             'password' => 'required',
-            'fcm_token' => 'required|string',
+            'fcm_token' => 'nullable|string',
             'device_id' => 'nullable|string',
         ]);
 
