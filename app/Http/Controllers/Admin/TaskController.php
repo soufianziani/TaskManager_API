@@ -565,6 +565,38 @@ class TaskController extends Controller
         // Check if user can edit this task (with super_admin bypass)
         $canEdit = $user->hasPermissionWithSuperAdminBypass('update task');
         
+        // Check if controller is trying to complete a task in_progress (regardless of edit permission)
+        // This allows controllers (super admin, admin, or regular user) to complete tasks when in_progress
+        if ($isController && $task->step === 'in_progress') {
+            $isCompletingTask = $request->filled('step') && $request->step === 'completed';
+            
+            if ($isCompletingTask) {
+                // Allow controllers to update step (justif_file is optional - can complete without files)
+                $allowedFields = ['step'];
+                // If justif_file is provided, allow it too
+                if ($request->has('justif_file')) {
+                    $allowedFields[] = 'justif_file';
+                }
+                $requestFields = array_keys($request->all());
+                $unauthorizedFields = array_diff($requestFields, $allowedFields);
+                
+                if (!empty($unauthorizedFields)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unauthorized. Controllers can only complete tasks by updating the step. You cannot edit other task details.',
+                    ], 403);
+                }
+                // Controller can complete - continue to update logic below
+            } elseif (!$canEdit) {
+                // Controller trying to do something other than complete and doesn't have edit permission
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized. Controllers can only complete tasks that are in progress. You cannot edit other task details.',
+                ], 403);
+            }
+            // If controller has edit permission and is not completing, allow normal edit flow below
+        }
+        
         // If user can't edit, check if they can at least update step and justif_file (for completing tasks)
         if (!$canEdit) {
             // Check if user is controller
@@ -594,6 +626,7 @@ class TaskController extends Controller
                         ], 403);
                     }
                 } elseif ($task->step === 'in_progress') {
+                    // This case is already handled above, but keep for backward compatibility
                     // Controllers can complete in_progress tasks
                     $isCompletingTask = $request->filled('step') && $request->step === 'completed';
                     
