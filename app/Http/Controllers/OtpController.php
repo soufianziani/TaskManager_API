@@ -34,8 +34,9 @@ class OtpController extends Controller
             ->first();
 
         // IMPORTANT: Check if user exists and is active BEFORE sending OTP to avoid wasting money
-        // Exception: Allow for 'register' purpose even if user doesn't exist
-        if ($purpose !== 'register') {
+        // Exception: Allow for 'register' and 'phone_update' purposes even if user doesn't exist
+        // For 'phone_update', user must be authenticated (logged in)
+        if ($purpose !== 'register' && $purpose !== 'phone_update') {
             if (!$user) {
                 return response()->json([
                     'success' => false,
@@ -54,8 +55,19 @@ class OtpController extends Controller
                 ], 403);
             }
         }
+        
+        // For 'phone_update' purpose, verify user is authenticated
+        if ($purpose === 'phone_update') {
+            $authenticatedUser = $request->user();
+            if (!$authenticatedUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized. Please log in to update your phone number.',
+                ], 401);
+            }
+        }
 
-        // Only send OTP if user exists and is active (or for register purpose)
+        // Only send OTP if user exists and is active (or for register/phone_update purpose)
         $otpLog = $this->otpService->requestOtpViaWhatsApp($phoneNumber, $purpose, $user);
 
         if ($otpLog->status === 'sent') {
@@ -148,8 +160,9 @@ class OtpController extends Controller
         $user = User::where('phone_number', $normalizedPhone)->first();
 
         // IMPORTANT: Check if user exists and is active BEFORE sending OTP to avoid wasting money
-        // Exception: Allow for 'register' purpose even if user doesn't exist
-        if ($purpose !== 'register') {
+        // Exception: Allow for 'register' and 'phone_update' purposes even if user doesn't exist
+        // For 'phone_update', user must be authenticated (logged in)
+        if ($purpose !== 'register' && $purpose !== 'phone_update') {
             if (!$user) {
                 return response()->json([
                     'success' => false,
@@ -168,8 +181,19 @@ class OtpController extends Controller
                 ], 403);
             }
         }
+        
+        // For 'phone_update' purpose, verify user is authenticated
+        if ($purpose === 'phone_update') {
+            $authenticatedUser = $request->user();
+            if (!$authenticatedUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized. Please log in to update your phone number.',
+                ], 401);
+            }
+        }
 
-        // Only send OTP if user exists and is active (or for register purpose)
+        // Only send OTP if user exists and is active (or for register/phone_update purpose)
         $otpLog = $this->otpService->requestOtpViaSms($phoneNumber, $purpose, $user);
 
         if ($otpLog->status === 'sent') {
