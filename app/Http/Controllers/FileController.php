@@ -19,8 +19,11 @@ class FileController extends Controller
         // Build validation rules based on file type
         $fileRules = ['required', 'file'];
         
+        // If type is "all", we'll auto-detect from file, so allow all types
+        $isAllType = strtolower($type) === 'all';
+        
         // Add file size and MIME type validation based on type
-        switch ($type) {
+        switch (strtolower($type)) {
             case 'video':
                 // Video files: max 500MB, allow all common video formats
                 $fileRules[] = 'max:512000'; // 500MB in KB
@@ -49,6 +52,14 @@ class FileController extends Controller
                 // Comprehensive list of image and video MIME types
                 $fileRules[] = 'mimetypes:image/jpeg,image/png,image/gif,image/bmp,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/x-flv,video/x-ms-wmv,video/3gpp,video/mpeg,video/x-m4v,video/x-ms-asf,video/vnd.rn-realvideo,video/ogg,video/divx,video/x-ms-wm,video/x-ms-wmx,video/x-ms-wvx,video/x-f4v,video/annodex';
                 break;
+            case 'all':
+                // For "all" type, allow all supported file types: max 500MB (for videos)
+                $fileRules[] = 'max:512000'; // 500MB in KB
+                // Allow all image, video, and PDF extensions
+                $fileRules[] = 'mimes:jpg,jpeg,png,gif,bmp,webp,mp4,mov,avi,mkv,webm,flv,wmv,m4v,3gp,mpg,mpeg,qt,asf,rm,rmvb,ogv,divx,xvid,m2v,vob,ts,mts,m2ts,f4v,amv,pdf';
+                // Allow all image, video, and PDF MIME types
+                $fileRules[] = 'mimetypes:image/jpeg,image/png,image/gif,image/bmp,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/x-flv,video/x-ms-wmv,video/3gpp,video/mpeg,video/x-m4v,video/x-ms-asf,video/vnd.rn-realvideo,video/ogg,video/divx,video/x-ms-wm,video/x-ms-wmx,video/x-ms-wvx,video/x-f4v,video/annodex,application/pdf';
+                break;
             default:
                 // Default: max 100MB
                 $fileRules[] = 'max:102400'; // 100MB in KB
@@ -56,13 +67,34 @@ class FileController extends Controller
         
         $request->validate([
             'file' => $fileRules,
-            'type' => 'required|string|in:foto,video,pdf,url,foto or video',
+            'type' => 'required|string|in:foto,video,pdf,url,foto or video,all',
             'file_for' => 'required|string|in:justif,task',
         ]);
 
         try {
             $uploadedFile = $request->file('file');
             $fileFor = $request->file_for;
+
+            // If type is "all", auto-detect from file extension
+            $finalType = $type;
+            if (strtolower($type) === 'all') {
+                $extension = strtolower($uploadedFile->getClientOriginalExtension());
+                $mimeType = $uploadedFile->getMimeType();
+                
+                // Detect type from extension and MIME type
+                if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']) ||
+                    strpos($mimeType, 'image/') === 0) {
+                    $finalType = 'foto';
+                } elseif (in_array($extension, ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v', '3gp', 'mpg', 'mpeg', 'qt', 'asf', 'rm', 'rmvb', 'ogv', 'divx', 'xvid', 'm2v', 'vob', 'ts', 'mts', 'm2ts', 'f4v', 'amv']) ||
+                    strpos($mimeType, 'video/') === 0) {
+                    $finalType = 'video';
+                } elseif ($extension === 'pdf' || $mimeType === 'application/pdf') {
+                    $finalType = 'pdf';
+                } else {
+                    // Default to 'file' if can't detect
+                    $finalType = 'file';
+                }
+            }
 
             // Generate unique filename
             $filename = time() . '_' . uniqid() . '.' . $uploadedFile->getClientOriginalExtension();
@@ -88,9 +120,9 @@ class FileController extends Controller
                 $fullUrl = $appUrl . $publicPath;
             }
 
-            // Save file record to database with the full public URL
+            // Save file record to database with the full public URL and detected type
             $file = File::create([
-                'type' => $type,
+                'type' => $finalType,
                 'file_for' => $fileFor,
                 'url' => $fullUrl,
             ]);
