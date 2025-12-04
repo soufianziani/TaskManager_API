@@ -74,19 +74,19 @@ class CreateTaskRequest extends FormRequest
             $timeCloture = $this->input('time_cloture');
             $timeOut = $this->input('time_out');
 
-            // Validate that if task end time is set, task start time should also be set
+            // Validate that if task end time is set, alarm start time should also be set
             if ($timeCloture && !$timeOut) {
                 $validator->errors()->add(
                     'time_out',
-                    'The task start time is required when the task end time is set.'
+                    'The alarm start time is required when the task end time is set.'
                 );
             }
 
-            // Validate that if task start time is set, task end time should also be set
+            // Validate that if alarm start time is set, task end time should also be set
             if ($timeOut && !$timeCloture) {
                 $validator->errors()->add(
                     'time_cloture',
-                    'The task end time is required when the task start time is set.'
+                    'The task end time is required when the alarm start time is set.'
                 );
             }
 
