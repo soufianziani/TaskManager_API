@@ -882,6 +882,46 @@ class TaskController extends Controller
             }
 
             $now = \Carbon\Carbon::now();
+
+            // NEW FORMAT: alarm offset as days / hours / minutes
+            // {
+            //   "days": 1,
+            //   "hours": 2,
+            //   "minutes": 30
+            // }
+            if (isset($alarmData['days']) || isset($alarmData['hours']) || isset($alarmData['minutes'])) {
+                $days = (int)($alarmData['days'] ?? 0);
+                $hours = (int)($alarmData['hours'] ?? 0);
+                $minutes = (int)($alarmData['minutes'] ?? 0);
+                $seconds = (int)($alarmData['seconds'] ?? 0);
+
+                // Base time: use period_start if available, otherwise created_at, otherwise now
+                if (!empty($task->period_start)) {
+                    try {
+                        $base = \Carbon\Carbon::parse($task->period_start);
+                    } catch (\Exception $e) {
+                        $base = $task->created_at ?? $now;
+                    }
+                } else {
+                    $base = $task->created_at ?? $now;
+                }
+
+                $alarmDateTime = $base->copy()
+                    ->addDays($days)
+                    ->addHours($hours)
+                    ->addMinutes($minutes)
+                    ->addSeconds($seconds);
+
+                if ($now->lt($alarmDateTime)) {
+                    return [
+                        'allowed' => false,
+                        'message' => 'Alarm time has not been reached yet. Please wait until ' . $alarmDateTime->format('Y-m-d H:i:s'),
+                    ];
+                }
+
+                // Offset-based alarm has passed, allow step change
+                return ['allowed' => true, 'message' => ''];
+            }
             
             // Check if task is periodic
             $isPeriodic = !empty($task->period_type) && strpos($task->period_type, 'periodic') !== false;

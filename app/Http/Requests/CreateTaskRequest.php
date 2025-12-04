@@ -51,6 +51,20 @@ class CreateTaskRequest extends FormRequest
     }
 
     /**
+     * Custom attribute names for validation errors.
+     * This is what the user will see in error messages instead of the raw field name.
+     */
+    public function attributes(): array
+    {
+        return [
+            'rest_time' => 'time between alarms',
+            'rest_max' => 'maximum alarm repeats',
+            'time_cloture' => 'task end time',
+            'time_out' => 'task start time',
+        ];
+    }
+
+    /**
      * Configure the validator instance.
      */
     public function withValidator($validator)
