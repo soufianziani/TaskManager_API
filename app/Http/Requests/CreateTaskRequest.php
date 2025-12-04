@@ -74,19 +74,19 @@ class CreateTaskRequest extends FormRequest
             $timeCloture = $this->input('time_cloture');
             $timeOut = $this->input('time_out');
 
-            // Validate that if time_cloture is set, time_out should also be set
+            // Validate that if task end time is set, task start time should also be set
             if ($timeCloture && !$timeOut) {
                 $validator->errors()->add(
                     'time_out',
-                    'Time out (task start time) is required when time cloture (task end time) is set.'
+                    'The task start time is required when the task end time is set.'
                 );
             }
 
-            // Validate that if time_out is set, time_cloture should also be set
+            // Validate that if task start time is set, task end time should also be set
             if ($timeOut && !$timeCloture) {
                 $validator->errors()->add(
                     'time_cloture',
-                    'Time cloture (task end time) is required when time out (task start time) is set.'
+                    'The task end time is required when the task start time is set.'
                 );
             }
 
@@ -100,7 +100,7 @@ class CreateTaskRequest extends FormRequest
                     if (count($timeClotureParts) < 2 || count($timeOutParts) < 2) {
                         $validator->errors()->add(
                             'time_cloture',
-                            'Invalid time format. Must be in HH:mm:ss format.'
+                            'Invalid time format for task end time. It must be in HH:mm:ss format.'
                         );
                     } else {
                         $timeClotureHour = (int)$timeClotureParts[0];
@@ -115,13 +115,13 @@ class CreateTaskRequest extends FormRequest
                                 if ($timeClotureMin <= $timeOutMin) {
                                     $validator->errors()->add(
                                         'time_cloture',
-                                        'Task end time must be after task start time.'
+                                        'The task end time must be after the task start time.'
                                     );
                                 }
                             } else {
                                 $validator->errors()->add(
                                     'time_cloture',
-                                    'Task end time must be after task start time.'
+                                    'The task end time must be after the task start time.'
                                 );
                             }
                         }
@@ -129,7 +129,7 @@ class CreateTaskRequest extends FormRequest
                 } catch (\Exception $e) {
                     $validator->errors()->add(
                         'time_cloture',
-                        'Invalid time format. Must be in HH:mm:ss format.'
+                        'Invalid time format for task end time. It must be in HH:mm:ss format.'
                     );
                 }
             }
