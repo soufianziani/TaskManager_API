@@ -235,4 +235,51 @@ class Task extends Model
             return null;
         }
     }
+
+    /**
+     * Calculate alarm start datetime from task end time and alarm offset
+     * Alarm offset is stored in alarm field as JSON: {"days": 1, "hours": 2, "minutes": 30}
+     * Returns null if calculation is not possible
+     */
+    public function calculateAlarmStartTime(): ?\Carbon\Carbon
+    {
+        if (empty($this->alarm) || empty($this->time_cloture)) {
+            return null;
+        }
+
+        // Get task end datetime
+        $endDateTime = $this->calculateEndDateTime();
+        if (!$endDateTime) {
+            return null;
+        }
+
+        try {
+            // Parse alarm JSON
+            $alarmData = json_decode($this->alarm, true);
+            if (!is_array($alarmData) || empty($alarmData)) {
+                return null;
+            }
+
+            // Check for alarm offset format: {"days": 1, "hours": 2, "minutes": 30}
+            if (isset($alarmData['days']) || isset($alarmData['hours']) || isset($alarmData['minutes'])) {
+                $days = (int)($alarmData['days'] ?? 0);
+                $hours = (int)($alarmData['hours'] ?? 0);
+                $minutes = (int)($alarmData['minutes'] ?? 0);
+                $seconds = (int)($alarmData['seconds'] ?? 0);
+
+                // Calculate alarm start time by subtracting offset from end time
+                $alarmStartTime = $endDateTime->copy()
+                    ->subDays($days)
+                    ->subHours($hours)
+                    ->subMinutes($minutes)
+                    ->subSeconds($seconds);
+
+                return $alarmStartTime;
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
 }

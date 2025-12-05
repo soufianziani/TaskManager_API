@@ -6,6 +6,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Delay;
 use App\Models\NotificationTimeout;
+use App\Models\AlarmNotification;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Factory;
@@ -43,8 +44,13 @@ class CheckTaskTimeouts extends Command
         $skippedCount = 0;
         $delayAlarmCount = 0;
         $repeatTimeoutCount = 0;
+        $alarmNotificationCount = 0;
 
-        // First, check for active delays that need repeat alarms
+        // First, check for alarm notifications that need to be sent
+        $this->info('Checking for alarm notifications...');
+        $this->processAlarmNotifications($now, $alarmNotificationCount, $skippedCount);
+
+        // Then, check for active delays that need repeat alarms
         $this->info('Checking for delay repeat alarms...');
         $activeDelays = Delay::where('rest_max', '>', 0)
             ->whereNotNull('next_alarm_at')
@@ -199,6 +205,7 @@ class CheckTaskTimeouts extends Command
         $this->newLine();
         $this->info("Summary:");
         $this->info("  - New start time notifications sent: {$notifiedCount}");
+        $this->info("  - Alarm notifications sent: {$alarmNotificationCount}");
         $this->info("  - Delay repeat alarms sent: {$delayAlarmCount}");
         $this->info("  - Timeout repeat notifications sent: {$repeatTimeoutCount}");
         $this->info("  - Skipped/Errors: {$skippedCount}");
@@ -862,6 +869,381 @@ class CheckTaskTimeouts extends Command
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+    }
+
+    /**
+     * Process alarm notifications - check for tasks where alarm start time has been reached
+     */
+    private function processAlarmNotifications(Carbon $now, int &$alarmNotificationCount, int &$skippedCount): void
+    {
+        // Get all tasks with alarm set and time_cloture set
+        $tasks = Task::whereNotNull('alarm')
+            ->whereNotNull('time_cloture')
+            ->where('status', true) // Only active tasks
+            ->get();
+
+        if ($tasks->isEmpty()) {
+            $this->info('No tasks with alarms found.');
+            return;
+        }
+
+        $this->info("Found {$tasks->count()} tasks with alarms to check.");
+
+        foreach ($tasks as $task) {
+            try {
+                // Calculate alarm start time
+                $alarmStartTime = $task->calculateAlarmStartTime();
+                
+                if (!$alarmStartTime) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Check if alarm start time has been reached (within current minute)
+                if ($now->gte($alarmStartTime) && $now->diffInMinutes($alarmStartTime) < 1) {
+                    // Check if alarm notifications have already been initialized
+                    $existingAlarmNotifications = AlarmNotification::where('task_id', (string)$task->id)->get();
+                    
+                    if ($existingAlarmNotifications->isEmpty()) {
+                        // Initialize alarm notifications for all assigned users
+                        $this->initializeAlarmNotifications($task, $now);
+                    } else {
+                        // Process existing alarm notifications that are due
+                        $this->processDueAlarmNotifications($task, $now, $alarmNotificationCount, $skippedCount);
+                    }
+                }
+            } catch (\Exception $e) {
+                $this->error("Error processing alarm for task #{$task->id}: " . $e->getMessage());
+                Log::error('Error processing alarm notification', [
+                    'task_id' => $task->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                $skippedCount++;
+            }
+        }
+    }
+
+    /**
+     * Initialize alarm notifications for all assigned users when alarm start time is reached
+     */
+    private function initializeAlarmNotifications(Task $task, Carbon $now): void
+    {
+        try {
+            // Parse users field
+            if (empty($task->users)) {
+                Log::info('Task has no assigned users for alarm notification', ['task_id' => $task->id]);
+                return;
+            }
+
+            $usersStr = $task->users;
+            $userIds = [];
+
+            // Try to decode as JSON array
+            $usersArray = json_decode($usersStr, true);
+            if (is_array($usersArray)) {
+                $userIds = array_map('intval', $usersArray);
+            } else {
+                preg_match_all('/["\']?(\d+)["\']?/', $usersStr, $matches);
+                if (!empty($matches[1])) {
+                    $userIds = array_map('intval', $matches[1]);
+                }
+            }
+
+            if (empty($userIds)) {
+                return;
+            }
+
+            // Exclude creator and controller
+            $excludedUserIds = [];
+            if (!empty($task->created_by)) {
+                $excludedUserIds[] = (int)$task->created_by;
+            }
+            if (!empty($task->controller)) {
+                $controller = $task->controller;
+                $controllerUser = null;
+                if (is_numeric($controller)) {
+                    $controllerUser = User::where('id', (int)$controller)->first();
+                }
+                if (!$controllerUser) {
+                    $controllerUser = User::where(function ($query) use ($controller) {
+                        $query->where('user_name', $controller)
+                            ->orWhere('email', $controller);
+                    })->first();
+                }
+                if ($controllerUser) {
+                    $excludedUserIds[] = $controllerUser->id;
+                }
+            }
+            $userIds = array_diff($userIds, $excludedUserIds);
+
+            if (empty($userIds)) {
+                return;
+            }
+
+            // Get users with FCM tokens
+            $users = User::whereIn('id', $userIds)
+                ->whereNotNull('fcm_token')
+                ->where('fcm_token', '!=', '')
+                ->get();
+
+            if ($users->isEmpty()) {
+                return;
+            }
+
+            // Get rest_time and rest_max from task
+            $restTime = $task->rest_time;
+            $restMax = (int)($task->rest_max ?? 0);
+            $restTimeStr = null;
+
+            if ($restTime) {
+                $restTimeStr = $restTime;
+                if (is_object($restTimeStr) && method_exists($restTimeStr, 'format')) {
+                    $restTimeStr = $restTimeStr->format('H:i:s');
+                } else {
+                    $restTimeStr = (string)$restTimeStr;
+                }
+            }
+
+            // Calculate next alarm time
+            $nextAlarmAt = null;
+            if ($restTimeStr && $restMax > 0) {
+                $restTimeParts = explode(':', $restTimeStr);
+                if (count($restTimeParts) >= 2) {
+                    $hours = (int)$restTimeParts[0];
+                    $minutes = (int)$restTimeParts[1];
+                    $seconds = isset($restTimeParts[2]) ? (int)$restTimeParts[2] : 0;
+                    $nextAlarmAt = $now->copy()
+                        ->addHours($hours)
+                        ->addMinutes($minutes)
+                        ->addSeconds($seconds);
+                }
+            }
+
+            // Create alarm notification records for each user and send first notification
+            foreach ($users as $user) {
+                try {
+                    // Create alarm notification record
+                    $alarmNotification = AlarmNotification::create([
+                        'task_id' => (string)$task->id,
+                        'users_id' => (string)$user->id,
+                        'description' => "Alarm notification initialized for task: {$task->name}",
+                        'next' => $nextAlarmAt,
+                        'rest_max' => $restMax,
+                        'notification_count' => 0,
+                        'read' => 0,
+                    ]);
+
+                    // Send first alarm notification
+                    $this->sendAlarmNotification($task, $user, $alarmNotification, $now);
+
+                } catch (\Exception $e) {
+                    Log::error('Error initializing alarm notification for user', [
+                        'user_id' => $user->id,
+                        'task_id' => $task->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Error initializing alarm notifications', [
+                'task_id' => $task->id ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
+    }
+
+    /**
+     * Process due alarm notifications
+     */
+    private function processDueAlarmNotifications(Task $task, Carbon $now, int &$alarmNotificationCount, int &$skippedCount): void
+    {
+        // Get all due alarm notifications for this task
+        $dueAlarmNotifications = AlarmNotification::where('task_id', (string)$task->id)
+            ->whereNotNull('next')
+            ->where('next', '<=', $now)
+            ->get();
+
+        if ($dueAlarmNotifications->isEmpty()) {
+            return;
+        }
+
+        foreach ($dueAlarmNotifications as $alarmNotification) {
+            try {
+                $user = User::where('id', $alarmNotification->users_id)
+                    ->whereNotNull('fcm_token')
+                    ->where('fcm_token', '!=', '')
+                    ->first();
+
+                if (!$user) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Check if max notifications reached
+                $restMax = (int)($alarmNotification->rest_max ?? 0);
+                $notificationCount = (int)($alarmNotification->notification_count ?? 0);
+
+                if ($restMax > 0 && $notificationCount >= $restMax) {
+                    // Max notifications reached, mark as complete
+                    $alarmNotification->next = null;
+                    $alarmNotification->save();
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Send alarm notification
+                $this->sendAlarmNotification($task, $user, $alarmNotification, $now);
+                $alarmNotificationCount++;
+
+                // Update notification count
+                $notificationCount++;
+                $alarmNotification->notification_count = $notificationCount;
+
+                // Calculate next alarm time
+                $restTime = $task->rest_time;
+                $nextAlarmAt = null;
+                if ($restTime && $restMax > 0 && $notificationCount < $restMax) {
+                    $restTimeStr = $restTime;
+                    if (is_object($restTimeStr) && method_exists($restTimeStr, 'format')) {
+                        $restTimeStr = $restTimeStr->format('H:i:s');
+                    } else {
+                        $restTimeStr = (string)$restTimeStr;
+                    }
+
+                    $restTimeParts = explode(':', $restTimeStr);
+                    if (count($restTimeParts) >= 2) {
+                        $hours = (int)$restTimeParts[0];
+                        $minutes = (int)$restTimeParts[1];
+                        $seconds = isset($restTimeParts[2]) ? (int)$restTimeParts[2] : 0;
+                        $nextAlarmAt = $now->copy()
+                            ->addHours($hours)
+                            ->addMinutes($minutes)
+                            ->addSeconds($seconds);
+                    }
+                }
+
+                // Update alarm notification record
+                $alarmNotification->next = $nextAlarmAt;
+                $alarmNotification->save();
+
+            } catch (\Exception $e) {
+                $skippedCount++;
+                Log::error('Error processing alarm notification', [
+                    'alarm_notification_id' => $alarmNotification->id ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Send alarm notification to user
+     */
+    private function sendAlarmNotification(Task $task, User $user, AlarmNotification $alarmNotification, Carbon $now): void
+    {
+        try {
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
+                Log::warning('Firebase messaging not available, cannot send alarm notification', [
+                    'task_id' => $task->id,
+                    'user_id' => $user->id
+                ]);
+                return;
+            }
+
+            // Calculate time remaining until task end
+            $endDateTime = $task->calculateEndDateTime();
+            $timeRemaining = $endDateTime ? $now->diffForHumans($endDateTime, true) : 'unknown';
+
+            // Get notification details
+            $restMax = (int)($alarmNotification->rest_max ?? 0);
+            $notificationCount = (int)($alarmNotification->notification_count ?? 0);
+            $currentNotificationNumber = $notificationCount + 1;
+            $notificationsLeft = $restMax > 0 ? max($restMax - $currentNotificationNumber, 0) : null;
+            $isLastNotification = $restMax > 0 && $currentNotificationNumber >= $restMax;
+
+            // Build notification message
+            $title = "Task Alarm: {$task->name}";
+            $body = "This is alarm notification #{$currentNotificationNumber}";
+            
+            if ($restMax > 0) {
+                $body .= " of {$restMax}";
+            }
+            
+            $body .= ". Time remaining until task end: {$timeRemaining}.";
+            
+            if ($notificationsLeft !== null && $notificationsLeft > 0) {
+                $body .= " {$notificationsLeft} notification(s) remaining.";
+            }
+            
+            if ($isLastNotification) {
+                $title = "⚠️ LAST ALARM - Task Alarm: {$task->name}";
+                $body = "⚠️ LAST ALARM: This is your final alarm notification (#{$currentNotificationNumber} of {$restMax}). Time remaining until task end: {$timeRemaining}.";
+            }
+
+            $notification = Notification::create($title, $body);
+
+            $message = CloudMessage::withTarget('token', $user->fcm_token)
+                ->withNotification($notification)
+                ->withData([
+                    'title' => $title,
+                    'body' => $body,
+                    'task_id' => $task->id,
+                    'task_name' => $task->name,
+                    'task_step' => $task->step,
+                    'user_name' => $user->user_name,
+                    'notification_type' => 'alarm',
+                    'notification_number' => $currentNotificationNumber,
+                    'total_notifications' => $restMax > 0 ? $restMax : null,
+                    'notifications_left' => $notificationsLeft,
+                    'is_last_notification' => $isLastNotification,
+                    'time_remaining' => $timeRemaining,
+                ]);
+
+            $messaging->send($message);
+
+            // Store notification in task_notifications table
+            \App\Models\TaskNotification::create([
+                'user_id' => $user->id,
+                'task_id' => $task->id,
+                'title' => $title,
+                'body' => $body,
+                'type' => 'alarm',
+            ]);
+
+            // Update alarm notification description
+            $descLines = [
+                "Alarm notification #{$currentNotificationNumber} sent.",
+                "Task: {$task->name} (ID: {$task->id})",
+                "User: {$user->user_name} (ID: {$user->id})",
+                "Time remaining until task end: {$timeRemaining}",
+                $restMax > 0 ? "Notification {$currentNotificationNumber} of {$restMax}" : "Notification #{$currentNotificationNumber}",
+                $notificationsLeft !== null && $notificationsLeft > 0 ? "{$notificationsLeft} notification(s) remaining" : ($isLastNotification ? "This was the last alarm notification" : "No notification limit"),
+                "Sent at: " . $now->toDateTimeString(),
+            ];
+            $alarmNotification->description = implode("\n", $descLines);
+            $alarmNotification->save();
+
+            Log::info('Alarm notification sent to user', [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'task_id' => $task->id,
+                'notification_number' => $currentNotificationNumber,
+                'rest_max' => $restMax,
+                'is_last' => $isLastNotification,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to send alarm notification', [
+                'user_id' => $user->id,
+                'user_name' => $user->user_name,
+                'task_id' => $task->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 }
