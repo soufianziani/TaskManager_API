@@ -848,11 +848,21 @@ class TaskController extends Controller
             $oldStepLabel = $stepLabels[$oldStep] ?? $oldStep;
             $newStepLabel = $stepLabels[$task->step] ?? $task->step;
             
-            $this->sendNotificationToAssignedUsers(
-                $task,
-                'Task Status Updated',
-                "Task '{$task->name}' status changed from {$oldStepLabel} to {$newStepLabel}"
-            );
+            // If task moved from pending to in_progress and has controller, notify controller
+            if ($oldStep === 'pending' && $task->step === 'in_progress' && !empty($task->controller)) {
+                $this->sendNotificationToController(
+                    $task,
+                    'Task Moved to Next Step',
+                    "Task '{$task->name}' has been moved to In Progress and requires your review"
+                );
+            } else {
+                // For other step changes, notify assigned users
+                $this->sendNotificationToAssignedUsers(
+                    $task,
+                    'Task Status Updated',
+                    "Task '{$task->name}' status changed from {$oldStepLabel} to {$newStepLabel}"
+                );
+            }
         }
 
         // Ensure justif_file raw value is included (for JSON array strings)
@@ -1355,6 +1365,106 @@ class TaskController extends Controller
             $this->initializationError = $e->getMessage();
             Log::error('Firebase initialization error in TaskController: ' . $e->getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Send notification to controller user of a task
+     */
+    private function sendNotificationToController(Task $task, string $title, string $body): void
+    {
+        try {
+            if (empty($task->controller)) {
+                Log::info('Task has no controller, skipping notification', ['task_id' => $task->id]);
+                return;
+            }
+
+            $controller = $task->controller;
+            $controllerUser = null;
+
+            // Try to find controller by ID first
+            if (is_numeric($controller)) {
+                $controllerUser = User::where('id', (int)$controller)
+                    ->whereNotNull('fcm_token')
+                    ->where('fcm_token', '!=', '')
+                    ->first();
+            }
+
+            // If not found by ID, try by user_name or email
+            if (!$controllerUser) {
+                $controllerUser = User::where(function ($query) use ($controller) {
+                    $query->where('user_name', $controller)
+                        ->orWhere('email', $controller);
+                })
+                ->whereNotNull('fcm_token')
+                ->where('fcm_token', '!=', '')
+                ->first();
+            }
+
+            if (!$controllerUser) {
+                Log::info('Controller user not found or has no FCM token', [
+                    'task_id' => $task->id,
+                    'controller' => $controller
+                ]);
+                return;
+            }
+
+            // Initialize Firebase messaging
+            $messaging = $this->getMessaging();
+            if (!$messaging) {
+                Log::warning('Firebase messaging not available, cannot send notification to controller', [
+                    'task_id' => $task->id,
+                    'error' => $this->initializationError
+                ]);
+                return;
+            }
+
+            // Create notification
+            $notification = Notification::create($title, $body);
+
+            try {
+                $message = CloudMessage::withTarget('token', $controllerUser->fcm_token)
+                    ->withNotification($notification)
+                    ->withData([
+                        'title' => $title,
+                        'body' => $body,
+                        'task_id' => $task->id,
+                        'task_name' => $task->name,
+                        'task_step' => $task->step,
+                        'user_name' => $controllerUser->user_name,
+                    ]);
+
+                $messaging->send($message);
+
+                // Store notification for listing in Notification page
+                TaskNotification::create([
+                    'user_id' => $controllerUser->id,
+                    'task_id' => $task->id,
+                    'title' => $title,
+                    'body' => $body,
+                    'type' => 'task_status_updated',
+                ]);
+
+                Log::info('Notification sent to controller', [
+                    'user_id' => $controllerUser->id,
+                    'user_name' => $controllerUser->user_name,
+                    'task_id' => $task->id,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to send notification to controller', [
+                    'user_id' => $controllerUser->id,
+                    'user_name' => $controllerUser->user_name,
+                    'task_id' => $task->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        } catch (\Exception $e) {
+            // Don't fail the task update if notification fails
+            Log::error('Error sending notification to controller', [
+                'task_id' => $task->id ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 
