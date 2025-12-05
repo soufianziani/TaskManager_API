@@ -78,12 +78,14 @@ class TaskController extends Controller
         $taskData = $task->toArray();
         $taskData['justif_file'] = $task->attributes['justif_file'] ?? $task->justif_file; // Include raw value
 
-        // Send notifications to assigned users
-        $this->sendNotificationToAssignedUsers(
-            $task,
-            'New Task Assigned',
-            "You have been assigned to a new task: {$task->name}"
-        );
+        // Send notifications to assigned users only when task is in "Pending" state
+        if ($task->step === 'pending') {
+            $this->sendNotificationToAssignedUsers(
+                $task,
+                'New Task Assigned',
+                "You have been assigned to a new task: {$task->name}"
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -141,9 +143,20 @@ class TaskController extends Controller
         // Get all pending tasks first
         $tasks = $baseQuery->get();
 
-        // Filter tasks that have passed timeout
+        // Filter tasks that have passed timeout OR reached start time (if alarm is set)
+        // Task start time = task end time (time_cloture) - alarm offset (alarm days/hours/minutes)
         $now = Carbon::now();
         $filteredTasks = $tasks->filter(function ($task) use ($now) {
+            // Check if task has alarm and calculate start time (alarm start time = task start time)
+            if (!empty($task->alarm) && !empty($task->time_cloture)) {
+                $startTime = $task->calculateAlarmStartTime();
+                if ($startTime && $now->gte($startTime)) {
+                    // Task start time has been reached, include it
+                    return true;
+                }
+            }
+            
+            // Otherwise, check if timeout has passed (for tasks without alarm)
             // Task must have both time_cloture and time_out set
             if (empty($task->time_cloture) || empty($task->time_out)) {
                 return false; // Exclude tasks without timeout configuration
@@ -399,11 +412,22 @@ class TaskController extends Controller
 
         $tasks = $query->orderBy('created_at', 'desc')->get();
 
-        // Filter tasks that have passed timeout ONLY when timeout_passed parameter is true
+        // Filter tasks that have passed timeout OR reached start time ONLY when timeout_passed parameter is true
         // This is used by home page buttons, but NOT by the pending page
+        // Task start time = task end time (time_cloture) - alarm offset (alarm days/hours/minutes)
         if ($stepFilter === 'pending' && $request->has('timeout_passed') && $request->timeout_passed == '1') {
             $now = Carbon::now();
             $tasks = $tasks->filter(function ($task) use ($now) {
+                // Check if task has alarm and calculate start time (alarm start time = task start time)
+                if (!empty($task->alarm) && !empty($task->time_cloture)) {
+                    $startTime = $task->calculateAlarmStartTime();
+                    if ($startTime && $now->gte($startTime)) {
+                        // Task start time has been reached, include it
+                        return true;
+                    }
+                }
+                
+                // Otherwise, check if timeout has passed (for tasks without alarm)
                 // Task must have both time_cloture and time_out set
                 if (empty($task->time_cloture) || empty($task->time_out)) {
                     return false; // Exclude tasks without timeout configuration
@@ -768,8 +792,21 @@ class TaskController extends Controller
             $task->users = $request->users;
         }
         // Check if user is trying to move task from pending to in_progress
-        // If task has alarm, verify that alarm time has passed
+        // Verify that period start time has been reached (for assigned users)
         if ($request->filled('step') && $request->step === 'in_progress' && $task->step === 'pending') {
+            // Check if period start time has been reached
+            if (!empty($task->period_start)) {
+                $now = Carbon::now();
+                $periodStart = Carbon::parse($task->period_start);
+                
+                if ($now->lt($periodStart)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Cannot move task to next step. The task period start time has not been reached yet. Period starts at: ' . $periodStart->format('Y-m-d H:i:s'),
+                    ], 400);
+                }
+            }
+            
             // Check if task has alarm (for periodic tasks)
             if (!empty($task->alarm)) {
                 $alarmCheck = $this->checkAlarmTime($task);
@@ -838,31 +875,19 @@ class TaskController extends Controller
         $task->load('taskFile', 'justifFile');
 
         // Send notification if step changed
+        // Notifications are only sent:
+        // 1. When task is in "Pending" state (handled in create method - sends to assigned users)
+        // 2. When task moves to "processed" (in_progress), notify controller user
         if ($stepChanged) {
-            $stepLabels = [
-                'pending' => 'Pending',
-                'in_progress' => 'In Progress',
-                'completed' => 'Completed'
-            ];
-            
-            $oldStepLabel = $stepLabels[$oldStep] ?? $oldStep;
-            $newStepLabel = $stepLabels[$task->step] ?? $task->step;
-            
-            // If task moved from pending to in_progress and has controller, notify controller
+            // If task moved from pending to in_progress (processed), notify controller user
             if ($oldStep === 'pending' && $task->step === 'in_progress' && !empty($task->controller)) {
                 $this->sendNotificationToController(
                     $task,
-                    'Task Moved to Next Step',
-                    "Task '{$task->name}' has been moved to In Progress and requires your review"
-                );
-            } else {
-                // For other step changes, notify assigned users
-                $this->sendNotificationToAssignedUsers(
-                    $task,
-                    'Task Status Updated',
-                    "Task '{$task->name}' status changed from {$oldStepLabel} to {$newStepLabel}"
+                    'Task in Processed',
+                    "Task '{$task->name}' is now in processed state and requires your review"
                 );
             }
+            // No notifications for other status changes (as per requirement: notifications only when task is in "Pending")
         }
 
         // Ensure justif_file raw value is included (for JSON array strings)
