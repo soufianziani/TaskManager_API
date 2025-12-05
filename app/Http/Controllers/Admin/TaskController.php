@@ -79,6 +79,10 @@ class TaskController extends Controller
         $taskData['justif_file'] = $task->attributes['justif_file'] ?? $task->justif_file; // Include raw value
 
         // Send notifications to assigned users only when task is in "Pending" state
+        // Notification rules:
+        // - All user types (super_admin, admin, user) can receive notifications
+        // - Assigned users get notification (excluding creator and controller)
+        // - Creator does NOT get notification when creating task
         if ($task->step === 'pending') {
             $this->sendNotificationToAssignedUsers(
                 $task,
@@ -889,9 +893,10 @@ class TaskController extends Controller
         $task->load('taskFile', 'justifFile');
 
         // Send notification if step changed
-        // Notifications are only sent:
-        // 1. When task is in "Pending" state (handled in create method - sends to assigned users)
-        // 2. When task moves to "processed" (in_progress), notify controller user
+        // Notification rules:
+        // - All user types (super_admin, admin, user) can receive notifications
+        // - When task moves to "processed" (in_progress), controller user gets notification
+        // - Assigned users get alarm start time notifications (handled by CheckTaskTimeouts command)
         if ($stepChanged) {
             // If task moved from pending to in_progress (processed), notify controller user
             if ($oldStep === 'pending' && $task->step === 'in_progress' && !empty($task->controller)) {
@@ -901,7 +906,7 @@ class TaskController extends Controller
                     "Task '{$task->name}' is now in processed state and requires your review"
                 );
             }
-            // No notifications for other status changes (as per requirement: notifications only when task is in "Pending")
+            // No notifications for other status changes
         }
 
         // Ensure justif_file raw value is included (for JSON array strings)
@@ -1409,6 +1414,10 @@ class TaskController extends Controller
 
     /**
      * Send notification to controller user of a task
+     * 
+     * Notification rules:
+     * - All user types (super_admin, admin, user) can receive notifications
+     * - Controller user is identified by task->controller field (can be ID, user_name, or email)
      */
     private function sendNotificationToController(Task $task, string $title, string $body): void
     {
@@ -1509,6 +1518,12 @@ class TaskController extends Controller
 
     /**
      * Send notification to all users assigned to a task
+     * 
+     * Notification rules:
+     * - All user types (super_admin, admin, user) can receive notifications
+     * - Creator is excluded from notifications
+     * - Controller is excluded from notifications
+     * - Only assigned users (in users field) receive notifications
      */
     private function sendNotificationToAssignedUsers(Task $task, string $title, string $body): void
     {

@@ -951,6 +951,12 @@ class CheckTaskTimeouts extends Command
 
     /**
      * Initialize alarm notifications for all assigned users when alarm start time is reached
+     * 
+     * Notification rules:
+     * - All user types (super_admin, admin, user) can receive notifications
+     * - Assigned users get notification of alarm start time
+     * - Creator is excluded from notifications
+     * - Controller is excluded from notifications
      */
     private function initializeAlarmNotifications(Task $task, Carbon $now): void
     {
