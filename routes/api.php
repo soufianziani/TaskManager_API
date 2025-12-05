@@ -106,4 +106,6 @@ Route::prefix('notifications')->middleware(['auth:sanctum', 'user.active'])->gro
     Route::get('/user', [App\Http\Controllers\NotificationController::class, 'listUserNotifications']);
     Route::put('/timeout/{id}/read', [App\Http\Controllers\NotificationController::class, 'markTimeoutNotificationAsRead']);
     Route::put('/timeout/{id}/delete', [App\Http\Controllers\NotificationController::class, 'deleteTimeoutNotification']);
+    Route::put('/alarm/{id}/read', [App\Http\Controllers\NotificationController::class, 'markAlarmNotificationAsRead']);
+    Route::put('/alarm/{id}/delete', [App\Http\Controllers\NotificationController::class, 'deleteAlarmNotification']);
 });

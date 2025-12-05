@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\TaskNotification;
 use App\Models\NotificationTimeout;
+use App\Models\AlarmNotification;
 use App\Models\Task;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -383,9 +384,36 @@ class NotificationController extends Controller
                 ];
             });
 
+        // Alarm notifications (from alarm_notifications)
+        // If show_read=1, return read=1 (history); otherwise return unread (read=0)
+        $alarmQuery = AlarmNotification::with('task')
+            ->where('users_id', (string)$userId)
+            ->where('read', $showReadTimeouts ? 1 : 0)
+            ->orderBy('created_at', 'desc');
+
+        $alarmNotifications = $alarmQuery
+            ->get()
+            ->map(function (AlarmNotification $n) {
+                return [
+                    'id' => $n->id,
+                    'source' => 'alarm',
+                    'type' => 'alarm',
+                    'title' => 'Task Alarm',
+                    'body' => $n->description,
+                    'task_id' => $n->task_id,
+                    'task_name' => $n->task->name ?? null,
+                    'created_at' => $n->created_at,
+                    'next' => $n->next,
+                    'read' => $n->read,
+                    'notification_count' => $n->notification_count,
+                    'rest_max' => $n->rest_max,
+                ];
+            });
+
         // Merge and sort by created_at descending
         $all = $taskNotifications
             ->merge($timeoutNotifications)
+            ->merge($alarmNotifications)
             ->sortByDesc('created_at')
             ->values();
 
@@ -448,6 +476,57 @@ class NotificationController extends Controller
     }
 
     /**
+     * Mark an alarm notification as read (set read = 1)
+     */
+    public function markAlarmNotificationAsRead(Request $request, $id): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        try {
+            $alarmNotification = AlarmNotification::where('id', $id)
+                ->where('users_id', (string)$user->id)
+                ->first();
+
+            if (!$alarmNotification) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Notification not found or you do not have permission to mark it as read.',
+                ], 404);
+            }
+
+            $alarmNotification->read = 1;
+            $alarmNotification->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification marked as read successfully',
+                'data' => [
+                    'id' => $alarmNotification->id,
+                    'read' => $alarmNotification->read,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error marking alarm notification as read', [
+                'notification_id' => $id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while marking notification as read: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Mark a notification_timeout as deleted (set read = 2)
      */
     public function deleteTimeoutNotification(Request $request, $id): JsonResponse
@@ -486,6 +565,57 @@ class NotificationController extends Controller
             ], 200);
         } catch (\Exception $e) {
             Log::error('Error deleting notification_timeout', [
+                'notification_id' => $id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while deleting notification: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Mark an alarm notification as deleted (set read = 2)
+     */
+    public function deleteAlarmNotification(Request $request, $id): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        try {
+            $alarmNotification = AlarmNotification::where('id', $id)
+                ->where('users_id', (string)$user->id)
+                ->first();
+
+            if (!$alarmNotification) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Notification not found or you do not have permission to delete it.',
+                ], 404);
+            }
+
+            $alarmNotification->read = 2;
+            $alarmNotification->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification deleted successfully',
+                'data' => [
+                    'id' => $alarmNotification->id,
+                    'read' => $alarmNotification->read,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error deleting alarm notification', [
                 'notification_id' => $id,
                 'user_id' => $user->id,
                 'error' => $e->getMessage(),
