@@ -877,18 +877,45 @@ class CheckTaskTimeouts extends Command
      */
     private function processAlarmNotifications(Carbon $now, int &$alarmNotificationCount, int &$skippedCount): void
     {
-        // Get all tasks with alarm set and time_cloture set
+        // First, process all due alarm notifications (based on 'next' field)
+        // This handles all scheduled subsequent notifications
+        $allDueAlarmNotifications = AlarmNotification::whereNotNull('next')
+            ->where('next', '<=', $now)
+            ->get()
+            ->groupBy('task_id');
+
+        if ($allDueAlarmNotifications->isNotEmpty()) {
+            $this->info("Found " . $allDueAlarmNotifications->count() . " task(s) with due alarm notifications to process.");
+        }
+
+        foreach ($allDueAlarmNotifications as $taskId => $alarmNotifications) {
+            try {
+                $task = Task::find($taskId);
+                if (!$task || !$task->status) {
+                    continue;
+                }
+
+                $this->info("Processing due alarm notifications for task #{$taskId} ({$task->name})");
+                $this->processDueAlarmNotifications($task, $now, $alarmNotificationCount, $skippedCount);
+            } catch (\Exception $e) {
+                $this->error("Error processing due alarm notifications for task #{$taskId}: " . $e->getMessage());
+                Log::error('Error processing due alarm notifications', [
+                    'task_id' => $taskId,
+                    'error' => $e->getMessage(),
+                ]);
+                $skippedCount++;
+            }
+        }
+
+        // Then, check for tasks where alarm start time has been reached but not yet initialized
         $tasks = Task::whereNotNull('alarm')
             ->whereNotNull('time_cloture')
             ->where('status', true) // Only active tasks
             ->get();
 
         if ($tasks->isEmpty()) {
-            $this->info('No tasks with alarms found.');
             return;
         }
-
-        $this->info("Found {$tasks->count()} tasks with alarms to check.");
 
         foreach ($tasks as $task) {
             try {
@@ -896,21 +923,18 @@ class CheckTaskTimeouts extends Command
                 $alarmStartTime = $task->calculateAlarmStartTime();
                 
                 if (!$alarmStartTime) {
-                    $skippedCount++;
                     continue;
                 }
 
-                // Check if alarm start time has been reached (within current minute)
-                if ($now->gte($alarmStartTime) && $now->diffInMinutes($alarmStartTime) < 1) {
+                // Check if alarm start time has been reached
+                if ($now->gte($alarmStartTime)) {
                     // Check if alarm notifications have already been initialized
                     $existingAlarmNotifications = AlarmNotification::where('task_id', (string)$task->id)->get();
                     
                     if ($existingAlarmNotifications->isEmpty()) {
-                        // Initialize alarm notifications for all assigned users
+                        // Initialize alarm notifications for all assigned users (first time only)
+                        $this->info("Initializing alarm notifications for task #{$task->id} ({$task->name})");
                         $this->initializeAlarmNotifications($task, $now);
-                    } else {
-                        // Process existing alarm notifications that are due
-                        $this->processDueAlarmNotifications($task, $now, $alarmNotificationCount, $skippedCount);
                     }
                 }
             } catch (\Exception $e) {
@@ -1006,9 +1030,9 @@ class CheckTaskTimeouts extends Command
                 }
             }
 
-            // Calculate next alarm time
+            // Calculate next alarm time (only if there are more notifications to send)
             $nextAlarmAt = null;
-            if ($restTimeStr && $restMax > 0) {
+            if ($restTimeStr && $restMax > 1) { // Only schedule next if restMax > 1 (more than just the first notification)
                 $restTimeParts = explode(':', $restTimeStr);
                 if (count($restTimeParts) >= 2) {
                     $hours = (int)$restTimeParts[0];
@@ -1037,6 +1061,10 @@ class CheckTaskTimeouts extends Command
 
                     // Send first alarm notification
                     $this->sendAlarmNotification($task, $user, $alarmNotification, $now);
+                    
+                    // Increment notification count after sending first notification
+                    $alarmNotification->notification_count = 1;
+                    $alarmNotification->save();
 
                 } catch (\Exception $e) {
                     Log::error('Error initializing alarm notification for user', [
@@ -1070,6 +1098,8 @@ class CheckTaskTimeouts extends Command
             return;
         }
 
+        $this->info("  Found {$dueAlarmNotifications->count()} due alarm notification(s) for task #{$task->id}");
+
         foreach ($dueAlarmNotifications as $alarmNotification) {
             try {
                 $user = User::where('id', $alarmNotification->users_id)
@@ -1095,6 +1125,7 @@ class CheckTaskTimeouts extends Command
                 }
 
                 // Send alarm notification
+                $this->info("  Sending alarm notification #" . ($notificationCount + 1) . " to user {$user->user_name} (ID: {$user->id})");
                 $this->sendAlarmNotification($task, $user, $alarmNotification, $now);
                 $alarmNotificationCount++;
 
