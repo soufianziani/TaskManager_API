@@ -1505,7 +1505,49 @@ class TaskController extends Controller
                 return;
             }
 
-            // Get users with FCM tokens
+            // Exclude creator and controller from notifications
+            $excludedUserIds = [];
+            
+            // Exclude creator (created_by field)
+            if (!empty($task->created_by)) {
+                $excludedUserIds[] = (int)$task->created_by;
+            }
+            
+            // Exclude controller (controller field - can be ID, user_name, or email)
+            if (!empty($task->controller)) {
+                $controller = $task->controller;
+                $controllerUser = null;
+                
+                // Try to find controller by ID first
+                if (is_numeric($controller)) {
+                    $controllerUser = User::where('id', (int)$controller)->first();
+                }
+                
+                // If not found by ID, try by user_name or email
+                if (!$controllerUser) {
+                    $controllerUser = User::where(function ($query) use ($controller) {
+                        $query->where('user_name', $controller)
+                            ->orWhere('email', $controller);
+                    })->first();
+                }
+                
+                if ($controllerUser) {
+                    $excludedUserIds[] = $controllerUser->id;
+                }
+            }
+            
+            // Remove excluded users from the list
+            $userIds = array_diff($userIds, $excludedUserIds);
+            
+            if (empty($userIds)) {
+                Log::info('No users to notify after excluding creator and controller', [
+                    'task_id' => $task->id,
+                    'excluded_user_ids' => $excludedUserIds
+                ]);
+                return;
+            }
+
+            // Get users with FCM tokens (excluding creator and controller)
             $users = User::whereIn('id', $userIds)
                 ->whereNotNull('fcm_token')
                 ->where('fcm_token', '!=', '')
