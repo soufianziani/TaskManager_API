@@ -588,6 +588,7 @@ class TaskController extends Controller
         
         // Check if user can edit this task (with super_admin bypass)
         $canEdit = $user->hasPermissionWithSuperAdminBypass('update task');
+        $isSuperAdmin = $user->type === 'super_admin';
         
         // Check if controller is trying to complete a task in_progress (regardless of edit permission)
         // This allows controllers (super admin, admin, or regular user) to complete tasks when in_progress
@@ -621,35 +622,40 @@ class TaskController extends Controller
             // If controller has edit permission and is not completing, allow normal edit flow below
         }
         
-        // If user can't edit, check if they can at least update step and justif_file (for completing tasks)
-        if (!$canEdit) {
+        // Handle any assigned user: can move to next step with justification (if task has controller)
+        // Handle controllers: can complete/refuse (already handled above)
+        // For other users: check if they can at least update step and justif_file (for completing tasks)
+        $hasController = !empty($task->controller);
+        
+        // Any assigned user (regardless of type or controller status) can move pending -> in_progress
+        if ($isAssignedToUser && $task->step === 'pending' && $hasController) {
+            $isMovingToProgress = $request->filled('step') && $request->step === 'in_progress';
+            
+            if ($isMovingToProgress) {
+                // Allow updating step and justif_file only
+                $allowedFields = ['step', 'justif_file'];
+                $requestFields = array_keys($request->all());
+                $unauthorizedFields = array_diff($requestFields, $allowedFields);
+                
+                if (!empty($unauthorizedFields)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unauthorized. You can only update the task status (step) and justification files (justif_file) when moving to next step.',
+                    ], 403);
+                }
+                // Continue to update logic below
+            } elseif (!$canEdit) {
+                // If user is not moving to progress and doesn't have edit permission, deny
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized. You can only move the task from pending to in progress.',
+                ], 403);
+            }
+            // If user has edit permission and is not moving to progress, allow full edit
+        } elseif (!$canEdit) {
             // Check if user is controller
             if ($isController) {
-                // If controller is also assigned to the task, allow them to move pending -> in_progress
-                if ($isAssignedToUser && $task->step === 'pending') {
-                    // Controller who is assigned can move pending -> in_progress
-                    $isMovingToProgress = $request->filled('step') && $request->step === 'in_progress';
-                    
-                    if ($isMovingToProgress) {
-                        // Allow updating step and justif_file
-                        $allowedFields = ['step', 'justif_file'];
-                        $requestFields = array_keys($request->all());
-                        $unauthorizedFields = array_diff($requestFields, $allowedFields);
-                        
-                        if (!empty($unauthorizedFields)) {
-                            return response()->json([
-                                'success' => false,
-                                'message' => 'Unauthorized. You can only update the task status (step) and justification files (justif_file).',
-                            ], 403);
-                        }
-                    } else {
-                        // Controller assigned user trying to do something other than move to progress
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'Unauthorized. You can only move the task from pending to in progress.',
-                        ], 403);
-                    }
-                } elseif ($task->step === 'in_progress') {
+                if ($task->step === 'in_progress') {
                     // This case is already handled above, but keep for backward compatibility
                     // Controllers can complete in_progress tasks
                     $isCompletingTask = $request->filled('step') && $request->step === 'completed';
@@ -711,17 +717,25 @@ class TaskController extends Controller
                         ], 403);
                     }
                 } else {
-                    // Task is pending - allow updating step and justif_file
-                    // Regular users can move pending -> in_progress
+                    // Task is pending but user is not controller
+                    // Moving pending -> in_progress is already handled above for all assigned users (line 631)
                     // If no controller, they can also move pending -> completed directly
-                    $allowedFields = ['step', 'justif_file'];
-                    $requestFields = array_keys($request->all());
-                    $unauthorizedFields = array_diff($requestFields, $allowedFields);
-                    
-                    if (!empty($unauthorizedFields)) {
+                    if (!$hasController) {
+                        $allowedFields = ['step', 'justif_file'];
+                        $requestFields = array_keys($request->all());
+                        $unauthorizedFields = array_diff($requestFields, $allowedFields);
+                        
+                        if (!empty($unauthorizedFields)) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'Unauthorized. You can only update the task status (step) and justification files (justif_file) for assigned tasks.',
+                            ], 403);
+                        }
+                    } else {
+                        // Task has controller and is pending - should have been handled above (line 631)
                         return response()->json([
                             'success' => false,
-                            'message' => 'Unauthorized. You can only update the task status (step) and justification files (justif_file) for assigned tasks.',
+                            'message' => 'Unauthorized. You can only move the task from pending to in progress when task has a controller.',
                         ], 403);
                     }
                 }

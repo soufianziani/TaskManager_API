@@ -341,6 +341,53 @@ class AuthController extends Controller
     }
 
     /**
+     * Validate token (using authenticated user from Bearer token).
+     * This endpoint validates the token from the Authorization header.
+     */
+    public function validateToken(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid or expired token.',
+                ], 401);
+            }
+
+            // Check if user is active
+            if (!$user->is_active) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User account is not active.',
+                ], 403);
+            }
+
+            // Load roles and get all permissions (direct + via roles)
+            $user->load(['roles']);
+            // Get all permissions including those from roles
+            $allPermissions = $user->getAllPermissions();
+            
+            // Add all permissions to user object for JSON response
+            $user->setRelation('permissions', $allPermissions);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Token is valid',
+                'data' => [
+                    'user' => $user,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Token validation failed: ' . $e->getMessage(),
+            ], 401);
+        }
+    }
+
+    /**
      * Get authenticated user.
      */
     public function user(Request $request): JsonResponse

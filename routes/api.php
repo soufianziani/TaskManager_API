@@ -35,6 +35,7 @@ Route::post('/reset-password', [App\Http\Controllers\AuthController::class, 'res
 Route::middleware(['auth:sanctum', 'user.active'])->group(function () {
     Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout']);
     Route::post('/update-password', [App\Http\Controllers\AuthController::class, 'updatePassword']);
+    Route::get('/validate-token', [App\Http\Controllers\AuthController::class, 'validateToken']);
     Route::get('/user', [App\Http\Controllers\AuthController::class, 'user']);
     Route::get('/users', [App\Http\Controllers\AuthController::class, 'getAllUsers']);
     Route::get('/departments', [App\Http\Controllers\AuthController::class, 'getAllDepartments']);
