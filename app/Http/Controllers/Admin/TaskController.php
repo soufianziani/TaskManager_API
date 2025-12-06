@@ -101,22 +101,22 @@ class TaskController extends Controller
     /**
      * Get task counts by type (pending tasks only).
      * - Super admin: sees counts for all tasks
-     * - Users with "show all pending" permission: sees counts for all pending tasks
-     * - Regular users: sees counts only for their tasks
+     * - Users with "show all tasks" permission: sees counts for all pending tasks
+     * - Regular users: sees counts only for tasks where they are assigned or controller
      */
     public function getTaskCountsByType(): JsonResponse
     {
         $user = request()->user();
         $userId = $user->id;
 
-        // Check if user has permission to show all pending tasks
-        $canShowAllPending = $user->hasPermissionWithSuperAdminBypass('show all pending');
+        // Check if user has permission to show all tasks
+        $canShowAllTasks = $user->hasPermissionWithSuperAdminBypass('show all tasks');
 
         // Build base query
         $baseQuery = Task::where('step', 'pending');
 
-        // If user is not super_admin and doesn't have permission to show all pending, filter by user assignment
-        if ($user->type !== 'super_admin' && !$canShowAllPending) {
+        // If user is not super_admin and doesn't have permission to show all tasks, filter by user assignment or controller
+        if ($user->type !== 'super_admin' && !$canShowAllTasks) {
             $userId = $user->id;
             $userName = $user->user_name;
             $userEmail = $user->email;
@@ -138,9 +138,7 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                })
-                // OR check if user is the creator (created_by)
-                ->orWhere('created_by', (string)$userId);
+                });
             });
         }
 
@@ -191,126 +189,57 @@ class TaskController extends Controller
     /**
      * Get task counts by status (for Quick Stats).
      * - Super admin: sees counts for all tasks
-     * - Users with "show all pending/processed/completed" permission: see all tasks with that status
-     * - Regular users: sees counts only for their tasks
+     * - Users with "show all tasks" permission: see all tasks
+     * - Regular users: sees counts only for tasks where they are assigned or controller
      */
     public function getTaskCountsByStatus(): JsonResponse
     {
         $user = request()->user();
         $userId = $user->id;
 
-        // Check permissions for showing all tasks by status
-        $canShowAllPending = $user->hasPermissionWithSuperAdminBypass('show all pending');
-        $canShowAllProcessed = $user->hasPermissionWithSuperAdminBypass('show all processed');
-        $canShowAllCompleted = $user->hasPermissionWithSuperAdminBypass('show all completed');
+        // Check if user has permission to show all tasks
+        $canShowAllTasks = $user->hasPermissionWithSuperAdminBypass('show all tasks');
+
+        // Helper function to filter tasks by user assignment or controller
+        $filterByUser = function($query) use ($userId, $user, $canShowAllTasks) {
+            if ($user->type !== 'super_admin' && !$canShowAllTasks) {
+                $userName = $user->user_name;
+                $userEmail = $user->email;
+                $query->where(function ($q) use ($userId, $userName, $userEmail) {
+                    $q->where(function ($subQ) use ($userId) {
+                        $subQ->where('users', 'like', '%"' . $userId . '"%')
+                          ->orWhere('users', 'like', '%[' . $userId . ']%')
+                          ->orWhere('users', 'like', '%[' . $userId . ',%')
+                          ->orWhere('users', 'like', '%,' . $userId . ',%')
+                          ->orWhere('users', 'like', '%,' . $userId . ']%')
+                          ->orWhere('users', '=', '[' . $userId . ']')
+                          ->orWhere('users', '=', '["' . $userId . '"]');
+                    })
+                    ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
+                        $subQ->where('controller', $userId)
+                          ->orWhere('controller', $userName)
+                          ->orWhere('controller', $userEmail)
+                          ->orWhere('controller', 'like', '%' . $userId . '%');
+                    });
+                });
+            }
+        };
 
         // Build base query for pending tasks
         $pendingQuery = Task::where('step', 'pending');
-        if ($user->type !== 'super_admin' && !$canShowAllPending) {
-            $userId = $user->id;
-            $userName = $user->user_name;
-            $userEmail = $user->email;
-            $pendingQuery->where(function ($q) use ($userId, $userName, $userEmail) {
-                $q->where(function ($subQ) use ($userId) {
-                    $subQ->where('users', 'like', '%"' . $userId . '"%')
-                      ->orWhere('users', 'like', '%[' . $userId . ']%')
-                      ->orWhere('users', 'like', '%[' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ']%')
-                      ->orWhere('users', '=', '[' . $userId . ']')
-                      ->orWhere('users', '=', '["' . $userId . '"]');
-                })
-                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
-                    $subQ->where('controller', $userId)
-                      ->orWhere('controller', $userName)
-                      ->orWhere('controller', $userEmail)
-                      ->orWhere('controller', 'like', '%' . $userId . '%');
-                })
-                // OR check if user is the creator (created_by)
-                ->orWhere('created_by', (string)$userId);
-            });
-        }
+        $filterByUser($pendingQuery);
 
         // Build base query for processed tasks
         $processedQuery = Task::where('step', 'in_progress');
-        if ($user->type !== 'super_admin' && !$canShowAllProcessed) {
-            $userId = $user->id;
-            $userName = $user->user_name;
-            $userEmail = $user->email;
-            $processedQuery->where(function ($q) use ($userId, $userName, $userEmail) {
-                $q->where(function ($subQ) use ($userId) {
-                    $subQ->where('users', 'like', '%"' . $userId . '"%')
-                      ->orWhere('users', 'like', '%[' . $userId . ']%')
-                      ->orWhere('users', 'like', '%[' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ']%')
-                      ->orWhere('users', '=', '[' . $userId . ']')
-                      ->orWhere('users', '=', '["' . $userId . '"]');
-                })
-                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
-                    $subQ->where('controller', $userId)
-                      ->orWhere('controller', $userName)
-                      ->orWhere('controller', $userEmail)
-                      ->orWhere('controller', 'like', '%' . $userId . '%');
-                })
-                // OR check if user is the creator (created_by)
-                ->orWhere('created_by', (string)$userId);
-            });
-        }
+        $filterByUser($processedQuery);
 
         // Build base query for completed tasks
         $completedQuery = Task::where('step', 'completed');
-        if ($user->type !== 'super_admin' && !$canShowAllCompleted) {
-            $userId = $user->id;
-            $userName = $user->user_name;
-            $userEmail = $user->email;
-            $completedQuery->where(function ($q) use ($userId, $userName, $userEmail) {
-                $q->where(function ($subQ) use ($userId) {
-                    $subQ->where('users', 'like', '%"' . $userId . '"%')
-                      ->orWhere('users', 'like', '%[' . $userId . ']%')
-                      ->orWhere('users', 'like', '%[' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ']%')
-                      ->orWhere('users', '=', '[' . $userId . ']')
-                      ->orWhere('users', '=', '["' . $userId . '"]');
-                })
-                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
-                    $subQ->where('controller', $userId)
-                      ->orWhere('controller', $userName)
-                      ->orWhere('controller', $userEmail)
-                      ->orWhere('controller', 'like', '%' . $userId . '%');
-                })
-                // OR check if user is the creator (created_by)
-                ->orWhere('created_by', (string)$userId);
-            });
-        }
+        $filterByUser($completedQuery);
 
         // Build base query for total (all tasks user can see)
         $baseQuery = Task::query();
-        if ($user->type !== 'super_admin') {
-            $userId = $user->id;
-            $userName = $user->user_name;
-            $userEmail = $user->email;
-            $baseQuery->where(function ($q) use ($userId, $userName, $userEmail) {
-                $q->where(function ($subQ) use ($userId) {
-                    $subQ->where('users', 'like', '%"' . $userId . '"%')
-                      ->orWhere('users', 'like', '%[' . $userId . ']%')
-                      ->orWhere('users', 'like', '%[' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ',%')
-                      ->orWhere('users', 'like', '%,' . $userId . ']%')
-                      ->orWhere('users', '=', '[' . $userId . ']')
-                      ->orWhere('users', '=', '["' . $userId . '"]');
-                })
-                ->orWhere(function ($subQ) use ($userId, $userName, $userEmail) {
-                    $subQ->where('controller', $userId)
-                      ->orWhere('controller', $userName)
-                      ->orWhere('controller', $userEmail)
-                      ->orWhere('controller', 'like', '%' . $userId . '%');
-                })
-                // OR check if user is the creator (created_by)
-                ->orWhere('created_by', (string)$userId);
-            });
-        }
+        $filterByUser($baseQuery);
 
         // Get task counts by status
         $counts = [
@@ -330,33 +259,22 @@ class TaskController extends Controller
     /**
      * Get all tasks with optional filtering.
      * - Super admin: sees all tasks
-     * - Users with "show all pending/processed/completed" permission: see all tasks with that status
-     * - Regular users: see only tasks where their ID is in the users field
+     * - Users with "show all tasks" permission: see all tasks
+     * - Regular users: see only tasks where:
+     *   - They are assigned (in users field), OR
+     *   - They are the controller of the task
      */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        // All authenticated users can view tasks (but filtered based on type)
+        // All authenticated users can view tasks (but filtered based on permissions)
         $query = Task::query();
 
-        // Check if user has permissions to show all tasks for specific status
-        $stepFilter = $request->has('step') && $request->step !== null ? $request->step : null;
-        $canShowAllPending = $user->hasPermissionWithSuperAdminBypass('show all pending');
-        $canShowAllProcessed = $user->hasPermissionWithSuperAdminBypass('show all processed');
-        $canShowAllCompleted = $user->hasPermissionWithSuperAdminBypass('show all completed');
-        
-        // Determine if user can see all tasks based on permission and filter
-        $canShowAllTasks = false;
-        if ($stepFilter === 'pending' && $canShowAllPending) {
-            $canShowAllTasks = true;
-        } elseif ($stepFilter === 'in_progress' && $canShowAllProcessed) {
-            $canShowAllTasks = true;
-        } elseif ($stepFilter === 'completed' && $canShowAllCompleted) {
-            $canShowAllTasks = true;
-        }
+        // Check if user has permission to show all tasks
+        $canShowAllTasks = $user->hasPermissionWithSuperAdminBypass('show all tasks');
 
-        // If user is not super_admin and doesn't have permission to show all for this status, filter by user assignment
+        // If user is not super_admin and doesn't have "show all tasks" permission, filter by user assignment or controller
         if ($user->type !== 'super_admin' && !$canShowAllTasks) {
             $userId = $user->id;
             $userName = $user->user_name;
@@ -365,7 +283,6 @@ class TaskController extends Controller
             // The users field is stored as JSON string like "[2]" or "[2,3]" or "[\"2\"]"
             // We need to check if the current user's ID is in that array
             // Also check if user is the controller
-            // Also check if user is the creator (created_by)
             // Try multiple formats to handle different JSON encodings
             $query->where(function ($q) use ($userId, $userName, $userEmail) {
                 // Check if user is assigned (in users field)
@@ -388,9 +305,7 @@ class TaskController extends Controller
                       ->orWhere('controller', $userName)
                       ->orWhere('controller', $userEmail)
                       ->orWhere('controller', 'like', '%' . $userId . '%');
-                })
-                // OR check if user is the creator (created_by)
-                ->orWhere('created_by', (string)$userId);
+                });
             });
         }
 
@@ -488,16 +403,19 @@ class TaskController extends Controller
     /**
      * Get a single task by ID.
      * - Super admin: can view any task
-     * - Users with "Edit-tasks" permission: can view any task
-     * - Regular users: can view tasks assigned to them
+     * - Users with "show all tasks" permission: can view any task
+     * - Regular users: can view tasks where they are assigned or controller
      */
     public function show(Request $request, $id): JsonResponse
     {
         $user = $request->user();
         $task = Task::findOrFail($id);
 
-        // If user is not super_admin and doesn't have edit permission, check if task is assigned to them
-        if ($user->type !== 'super_admin' && !$user->hasPermissionWithSuperAdminBypass('update task')) {
+        // Check if user has permission to show all tasks
+        $canShowAllTasks = $user->hasPermissionWithSuperAdminBypass('show all tasks');
+
+        // If user is not super_admin and doesn't have "show all tasks" permission, check if task is assigned to them or they are controller
+        if ($user->type !== 'super_admin' && !$canShowAllTasks) {
             $isAssignedToUser = $this->isTaskAssignedToUser($task, $user->id);
             
             // Check if user is controller
@@ -507,10 +425,7 @@ class TaskController extends Controller
                  $task->controller == $user->email ||
                  strpos($task->controller, (string)$user->id) !== false);
             
-            // Check if user is the creator (creators can view their tasks even if not assigned)
-            $isCreator = !empty($task->created_by) && $task->created_by == (string)$user->id;
-            
-            if (!$isAssignedToUser && !$isTaskController && !$isCreator) {
+            if (!$isAssignedToUser && !$isTaskController) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. You do not have permission to view this task.',
@@ -557,7 +472,8 @@ class TaskController extends Controller
     /**
      * Update an existing task.
      * - Super admin: can update any task
-     * - Users with "Edit-tasks" permission: can update any task
+     * - Users with "update all" permission: can update any task
+     * - Users with "update task" permission: can update tasks assigned to them
      * - Regular users: can update step and justif_file for tasks assigned to them
      */
     public function update(Request $request, $id): JsonResponse
@@ -568,11 +484,15 @@ class TaskController extends Controller
         // Check if user is the creator of this task
         $isCreator = !empty($task->created_by) && $task->created_by == (string)$user->id;
         
-        // If user is the creator, they can only edit if they are super admin or have "update task" permission
-        if ($isCreator && $user->type !== 'super_admin' && !$user->hasPermissionWithSuperAdminBypass('update task')) {
+        // Check permissions first
+        $canUpdateAll = $user->hasPermissionWithSuperAdminBypass('update all');
+        $canUpdateTask = $user->hasPermissionWithSuperAdminBypass('update task');
+        
+        // If user is the creator, they can only edit if they are super admin or have "update all" or "update task" permission
+        if ($isCreator && $user->type !== 'super_admin' && !$canUpdateAll && !$canUpdateTask) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. You created this task but do not have permission to edit it. Only super admins or users with "update task" permission can edit tasks.',
+                'message' => 'Unauthorized. You created this task but do not have permission to edit it. Only super admins or users with "update all" or "update task" permission can edit tasks.',
             ], 403);
         }
 
@@ -591,7 +511,8 @@ class TaskController extends Controller
         $isController = $isTaskController || $hasControllerPermission;
         
         // Check if user can edit this task (with super_admin bypass)
-        $canEdit = $user->hasPermissionWithSuperAdminBypass('update task');
+        // Check both "update task" (for own tasks) and "update all" (for all tasks) permissions
+        $canEdit = $canUpdateAll || $canUpdateTask;
         $isSuperAdmin = $user->type === 'super_admin';
         
         // Check if controller is trying to complete a task in_progress (regardless of edit permission)
@@ -648,7 +569,7 @@ class TaskController extends Controller
                     ], 403);
                 }
                 // Continue to update logic below
-            } elseif (!$canEdit) {
+            } elseif (!$canEdit && !$canUpdateAll) {
                 // If user is not moving to progress and doesn't have edit permission, deny
                 return response()->json([
                     'success' => false,
@@ -656,9 +577,9 @@ class TaskController extends Controller
                 ], 403);
             }
             // If user has edit permission and is not moving to progress, allow full edit
-        } elseif (!$canEdit) {
-            // Check if user is controller
-            if ($isController) {
+            } elseif (!$canEdit && !$canUpdateAll) {
+                // Check if user is controller
+                if ($isController) {
                 if ($task->step === 'in_progress') {
                     // This case is already handled above, but keep for backward compatibility
                     // Controllers can complete in_progress tasks
@@ -943,9 +864,14 @@ class TaskController extends Controller
             //   "hours": 2,
             //   "minutes": 30
             // }
+            // Note: hours can be -1 (from global server), treat as 0
             if (isset($alarmData['days']) || isset($alarmData['hours']) || isset($alarmData['minutes'])) {
                 $days = (int)($alarmData['days'] ?? 0);
                 $hours = (int)($alarmData['hours'] ?? 0);
+                // Convert -1 to 0 for calculation (backend stores -1, but we treat it as 0)
+                if ($hours == -1) {
+                    $hours = 0;
+                }
                 $minutes = (int)($alarmData['minutes'] ?? 0);
                 $seconds = (int)($alarmData['seconds'] ?? 0);
 

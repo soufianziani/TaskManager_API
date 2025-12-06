@@ -14,12 +14,14 @@ return [
     'default_permissions' => [
         'create task',
         'update task',
+        'update all',
         'controller',
         'actors',
         'task config',
         'show all pending',
         'show all processed',
         'show all completed',
+        'show all tasks',
     ],
 ];
 

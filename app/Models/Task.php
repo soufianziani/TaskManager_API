@@ -261,9 +261,14 @@ class Task extends Model
             }
 
             // Check for alarm offset format: {"days": 1, "hours": 2, "minutes": 30}
+            // Note: hours can be -1 (from global server), treat as 0
             if (isset($alarmData['days']) || isset($alarmData['hours']) || isset($alarmData['minutes'])) {
                 $days = (int)($alarmData['days'] ?? 0);
                 $hours = (int)($alarmData['hours'] ?? 0);
+                // Convert -1 to 0 for calculation (backend stores -1, but we treat it as 0)
+                if ($hours == -1) {
+                    $hours = 0;
+                }
                 $minutes = (int)($alarmData['minutes'] ?? 0);
                 $seconds = (int)($alarmData['seconds'] ?? 0);
 
