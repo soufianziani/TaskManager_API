@@ -266,10 +266,11 @@ class TaskController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $user = $request->user();
+        try {
+            $user = $request->user();
 
-        // All authenticated users can view tasks (but filtered based on permissions)
-        $query = Task::query();
+            // All authenticated users can view tasks (but filtered based on permissions)
+            $query = Task::query();
 
         // Check if user has permission to show all tasks
         $canShowAllTasks = $user->hasPermissionWithSuperAdminBypass('show all tasks');
@@ -334,6 +335,7 @@ class TaskController extends Controller
         // Filter tasks that have passed timeout OR reached start time ONLY when timeout_passed parameter is true
         // This is used by home page buttons, but NOT by the pending page
         // Task start time = task end time (time_cloture) - alarm offset (alarm days/hours/minutes)
+        $stepFilter = $request->input('step');
         if ($stepFilter === 'pending' && $request->has('timeout_passed') && $request->timeout_passed == '1') {
             $now = Carbon::now();
             $tasks = $tasks->filter(function ($task) use ($now) {
@@ -393,11 +395,23 @@ class TaskController extends Controller
             return $taskArray;
         });
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Tasks retrieved successfully',
-            'data' => $tasksData,
-        ], 200);
+            return response()->json([
+                'success' => true,
+                'message' => 'Tasks retrieved successfully',
+                'data' => $tasksData,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving tasks: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'user_id' => $request->user()->id ?? null,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve tasks: ' . $e->getMessage(),
+                'data' => [],
+            ], 500);
+        }
     }
 
     /**
