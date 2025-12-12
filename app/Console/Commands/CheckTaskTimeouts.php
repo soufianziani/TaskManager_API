@@ -908,9 +908,14 @@ class CheckTaskTimeouts extends Command
         }
 
         // Then, check for tasks where alarm start time has been reached but not yet initialized
+        // Alarm works only in timeout:
+        // - For pending tasks: send to assigned users
+        // - For in_progress tasks: send to controller
+        // - For completed tasks: don't send any notifications
         $tasks = Task::whereNotNull('alarm')
             ->whereNotNull('time_cloture')
             ->where('status', true) // Only active tasks
+            ->whereIn('step', ['pending', 'in_progress']) // Only pending or in_progress tasks
             ->get();
 
         if ($tasks->isEmpty()) {
@@ -919,6 +924,11 @@ class CheckTaskTimeouts extends Command
 
         foreach ($tasks as $task) {
             try {
+                // Skip completed tasks - no alarm notifications for completed tasks
+                if ($task->step === 'completed') {
+                    continue;
+                }
+
                 // Calculate alarm start time
                 $alarmStartTime = $task->calculateAlarmStartTime();
                 
@@ -932,8 +942,8 @@ class CheckTaskTimeouts extends Command
                     $existingAlarmNotifications = AlarmNotification::where('task_id', (string)$task->id)->get();
                     
                     if ($existingAlarmNotifications->isEmpty()) {
-                        // Initialize alarm notifications for all assigned users (first time only)
-                        $this->info("Initializing alarm notifications for task #{$task->id} ({$task->name})");
+                        // Initialize alarm notifications based on task step
+                        $this->info("Initializing alarm notifications for task #{$task->id} ({$task->name}) - Step: {$task->step}");
                         $this->initializeAlarmNotifications($task, $now);
                     }
                 }
@@ -950,77 +960,109 @@ class CheckTaskTimeouts extends Command
     }
 
     /**
-     * Initialize alarm notifications for all assigned users when alarm start time is reached
+     * Initialize alarm notifications when alarm start time is reached
+     * 
+     * Alarm works only in timeout:
+     * - For pending tasks: send to assigned users
+     * - For in_progress tasks: send to controller
+     * - For completed tasks: don't send any notifications (should not reach here)
      * 
      * Notification rules:
      * - All user types (super_admin, admin, user) can receive notifications
-     * - Assigned users get notification of alarm start time
      * - Creator is excluded from notifications
-     * - Controller is excluded from notifications
      */
     private function initializeAlarmNotifications(Task $task, Carbon $now): void
     {
         try {
-            // Parse users field
-            if (empty($task->users)) {
-                Log::info('Task has no assigned users for alarm notification', ['task_id' => $task->id]);
+            // Don't send alarm notifications for completed tasks
+            if ($task->step === 'completed') {
+                Log::info('Task is completed, skipping alarm notification', ['task_id' => $task->id]);
                 return;
             }
 
-            $usersStr = $task->users;
-            $userIds = [];
-
-            // Try to decode as JSON array
-            $usersArray = json_decode($usersStr, true);
-            if (is_array($usersArray)) {
-                $userIds = array_map('intval', $usersArray);
-            } else {
-                preg_match_all('/["\']?(\d+)["\']?/', $usersStr, $matches);
-                if (!empty($matches[1])) {
-                    $userIds = array_map('intval', $matches[1]);
+            // Determine who should receive notifications based on task step
+            $usersToNotify = [];
+            
+            if ($task->step === 'pending') {
+                // For pending tasks: send to assigned users
+                if (empty($task->users)) {
+                    Log::info('Task has no assigned users for alarm notification', ['task_id' => $task->id]);
+                    return;
                 }
-            }
+                
+                // Parse users field
+                $usersStr = $task->users;
+                $userIds = [];
 
-            if (empty($userIds)) {
-                return;
-            }
+                // Try to decode as JSON array
+                $usersArray = json_decode($usersStr, true);
+                if (is_array($usersArray)) {
+                    $userIds = array_map('intval', $usersArray);
+                } else {
+                    preg_match_all('/["\']?(\d+)["\']?/', $usersStr, $matches);
+                    if (!empty($matches[1])) {
+                        $userIds = array_map('intval', $matches[1]);
+                    }
+                }
 
-            // Exclude creator and controller
-            $excludedUserIds = [];
-            if (!empty($task->created_by)) {
-                $excludedUserIds[] = (int)$task->created_by;
-            }
-            if (!empty($task->controller)) {
+                if (empty($userIds)) {
+                    return;
+                }
+
+                // Exclude creator
+                $excludedUserIds = [];
+                if (!empty($task->created_by)) {
+                    $excludedUserIds[] = (int)$task->created_by;
+                }
+                $userIds = array_diff($userIds, $excludedUserIds);
+
+                if (empty($userIds)) {
+                    return;
+                }
+
+                // Get users with FCM tokens
+                $usersToNotify = User::whereIn('id', $userIds)
+                    ->whereNotNull('fcm_token')
+                    ->where('fcm_token', '!=', '')
+                    ->get();
+                    
+            } elseif ($task->step === 'in_progress') {
+                // For in_progress tasks: send to controller only
+                if (empty($task->controller)) {
+                    Log::info('Task is in_progress but has no controller for alarm notification', ['task_id' => $task->id]);
+                    return;
+                }
+                
+                // Find controller user
                 $controller = $task->controller;
                 $controllerUser = null;
                 if (is_numeric($controller)) {
-                    $controllerUser = User::where('id', (int)$controller)->first();
+                    $controllerUser = User::where('id', (int)$controller)
+                        ->whereNotNull('fcm_token')
+                        ->where('fcm_token', '!=', '')
+                        ->first();
                 }
                 if (!$controllerUser) {
                     $controllerUser = User::where(function ($query) use ($controller) {
                         $query->where('user_name', $controller)
                             ->orWhere('email', $controller);
-                    })->first();
+                    })
+                    ->whereNotNull('fcm_token')
+                    ->where('fcm_token', '!=', '')
+                    ->first();
                 }
+                
                 if ($controllerUser) {
-                    $excludedUserIds[] = $controllerUser->id;
+                    $usersToNotify = collect([$controllerUser]);
                 }
             }
-            $userIds = array_diff($userIds, $excludedUserIds);
 
-            if (empty($userIds)) {
+            if ($usersToNotify->isEmpty()) {
                 return;
             }
 
-            // Get users with FCM tokens
-            $users = User::whereIn('id', $userIds)
-                ->whereNotNull('fcm_token')
-                ->where('fcm_token', '!=', '')
-                ->get();
-
-            if ($users->isEmpty()) {
-                return;
-            }
+            // Use the users we determined above (assigned users for pending, controller for in_progress)
+            $users = $usersToNotify;
 
             // Get rest_time and rest_max from task
             $restTime = $task->rest_time;
@@ -1094,6 +1136,16 @@ class CheckTaskTimeouts extends Command
      */
     private function processDueAlarmNotifications(Task $task, Carbon $now, int &$alarmNotificationCount, int &$skippedCount): void
     {
+        // Don't send alarm notifications for completed tasks
+        if ($task->step === 'completed') {
+            $this->info("  Task #{$task->id} is completed, skipping alarm notifications");
+            // Mark all pending alarm notifications as complete
+            AlarmNotification::where('task_id', (string)$task->id)
+                ->whereNotNull('next')
+                ->update(['next' => null]);
+            return;
+        }
+
         // Get all due alarm notifications for this task
         $dueAlarmNotifications = AlarmNotification::where('task_id', (string)$task->id)
             ->whereNotNull('next')
@@ -1104,16 +1156,42 @@ class CheckTaskTimeouts extends Command
             return;
         }
 
-        $this->info("  Found {$dueAlarmNotifications->count()} due alarm notification(s) for task #{$task->id}");
+        $this->info("  Found {$dueAlarmNotifications->count()} due alarm notification(s) for task #{$task->id} (Step: {$task->step})");
 
         foreach ($dueAlarmNotifications as $alarmNotification) {
             try {
+                // Verify that the user should still receive notifications based on task step
                 $user = User::where('id', $alarmNotification->users_id)
                     ->whereNotNull('fcm_token')
                     ->where('fcm_token', '!=', '')
                     ->first();
 
                 if (!$user) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Check if user should receive notification based on task step
+                $shouldReceiveNotification = false;
+                
+                if ($task->step === 'pending') {
+                    // For pending tasks: only assigned users should receive notifications
+                    $isAssignedToUser = $this->isTaskAssignedToUser($task, $user->id);
+                    $shouldReceiveNotification = $isAssignedToUser;
+                } elseif ($task->step === 'in_progress') {
+                    // For in_progress tasks: only controller should receive notifications
+                    $isController = !empty($task->controller) && 
+                        ($task->controller == $user->id || 
+                         $task->controller == $user->user_name ||
+                         $task->controller == $user->email ||
+                         strpos($task->controller, (string)$user->id) !== false);
+                    $shouldReceiveNotification = $isController;
+                }
+                
+                if (!$shouldReceiveNotification) {
+                    // User should not receive notification for this step, skip and mark as complete
+                    $alarmNotification->next = null;
+                    $alarmNotification->save();
                     $skippedCount++;
                     continue;
                 }
@@ -1282,5 +1360,31 @@ class CheckTaskTimeouts extends Command
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Check if a task is assigned to a user
+     */
+    private function isTaskAssignedToUser(Task $task, int $userId): bool
+    {
+        if (empty($task->users)) {
+            return false;
+        }
+
+        $usersStr = $task->users;
+        
+        // Try to decode as JSON array
+        $usersArray = json_decode($usersStr, true);
+        if (is_array($usersArray)) {
+            return in_array($userId, $usersArray, true);
+        }
+
+        // Fallback: try string matching for different formats
+        $userIdStr = (string) $userId;
+        return strpos($usersStr, '"' . $userIdStr . '"') !== false ||
+               strpos($usersStr, '[' . $userIdStr . ']') !== false ||
+               strpos($usersStr, '[' . $userIdStr . ',') !== false ||
+               strpos($usersStr, ',' . $userIdStr . ',') !== false ||
+               strpos($usersStr, ',' . $userIdStr . ']') !== false;
     }
 }
