@@ -745,30 +745,46 @@ class TaskController extends Controller
             $task->users = $request->users;
         }
         // Check if user is trying to move task from pending to in_progress
-        // Verify that period start time has been reached (for assigned users)
+        // Task can be moved to next step ONLY between start time and end time
         if ($request->filled('step') && $request->step === 'in_progress' && $task->step === 'pending') {
-            // Check if period start time has been reached
-            if (!empty($task->period_start)) {
-                $now = Carbon::now();
-                $periodStart = Carbon::parse($task->period_start);
-                
-                if ($now->lt($periodStart)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Cannot move task to next step. The task period start time has not been reached yet. Period starts at: ' . $periodStart->format('Y-m-d H:i:s'),
-                    ], 400);
+            $now = Carbon::now();
+            
+            // Calculate start time: use alarm start time if available, otherwise use period_start
+            $startTime = null;
+            if (!empty($task->alarm) && !empty($task->time_cloture)) {
+                // If task has alarm, calculate alarm start time (time_cloture - alarm offset)
+                $startTime = $task->calculateAlarmStartTime();
+            }
+            
+            // If no alarm start time, use period_start
+            if (!$startTime && !empty($task->period_start)) {
+                try {
+                    $startTime = Carbon::parse($task->period_start);
+                } catch (\Exception $e) {
+                    $startTime = null;
                 }
             }
             
-            // Check if task has alarm (for periodic tasks)
-            if (!empty($task->alarm)) {
-                $alarmCheck = $this->checkAlarmTime($task);
-                if (!$alarmCheck['allowed']) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => $alarmCheck['message'],
-                    ], 400);
-                }
+            // Calculate end time: use time_cloture
+            $endTime = null;
+            if (!empty($task->time_cloture)) {
+                $endTime = $task->calculateEndDateTime();
+            }
+            
+            // Check if current time is between start and end
+            // Task can only be moved to next step if current time is between start time and end time
+            if ($startTime && $now->lt($startTime)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot move task to next step. Task start time has not been reached yet. Start time: ' . $startTime->format('Y-m-d H:i:s'),
+                ], 400);
+            }
+            
+            if ($endTime && $now->gt($endTime)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot move task to next step. Task end time has passed. End time: ' . $endTime->format('Y-m-d H:i:s'),
+                ], 400);
             }
         }
         
